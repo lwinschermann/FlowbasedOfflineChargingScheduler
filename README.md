@@ -1,1 +1,113 @@
-# FlowbasedOfflineChargingScheduler
+# Flow-based Offline Charging Scheduler (FOCS)
+
+For large groups of electric vehicles (EVs), controllers may repeatedly solve the following offline problem:
+
+Each EV charging session is a job j with arrival time, departure time, energy demand and maximum charging power. 
+A feasible charging schedule has to:
+1) schedule j only between its arrival and departure
+2) schedule j to charge at least its energy demand between its arrival and departure
+3) charge j at non-negative power (no V2G)
+4) charge j at a rate no more than its maximum charging power
+Furthermore, we want to make the aggregated power profile 'as flat as possible'. This may be the square of the l2-norm of the aggregated power (in the discretized setting). But it may also be any other separable function of the aggregated power that is convex, differentiable and increasing. 
+
+FOCS [1] is an algorithm that determines an optimal solution for the problem sketched above. For more information, we refer you to the paper.
+This repository holds a proof of concept implementation of FOCS [1]. 
+
+## Code
+The implementation of FOCS heavily relies on the python package networkx [2] for its network structures and maximum flow solvers. 
+Before running it yourself, make sure to check for hard coded paths. We both read and write csv files and the code was build as a proof of concept, not for usability. 
+
+As input, the code requires a csv to read a pandas dataframe from. Each row represents a charging session, or more generally a job in the problem instance. The following headers should be present:
+<table>
+  <tr>
+    <th>column header </th>
+    <th>unit </th>
+    <th>notes </th>
+  </tr>
+
+  <tr>
+    <td>'total_energy_Wh' </td>
+    <td>[Wh] </td>
+    <td>Total Energy demand. Note that the FOCSinstance class automatically converts this to kWh. If numerical inputs are too large, that may result in errors.  </td>
+  </tr>
+
+  <tr>
+    <td>'average_power_W' </td>
+    <td>[W] </td>
+    <td>Average power if energy demand served between arrival and departure time.  </td>
+  </tr>
+
+  <tr>
+    <td>'maxPower' </td>
+    <td>[W] </td>
+    <td>Maximum power. FOCSinstance objects will compare the average and maximum input to decide on the actual maximum power.  </td>
+  </tr>
+
+  <tr>
+    <td>'t0_[timestep]' </td>
+    <td>[units of timeStep since start] </td>
+    <td>Arrival time. Here, timeStep is the time granularity considered. For example, 900 would mean quarterly granularity, the column header would be 't0_900'. The arrival is at the beginning of the quarter. (Therefore including the quarter). </td>
+  </tr>
+
+  <tr>
+    <td>'t1_[timestep]' </td>
+    <td>[units of timeStep since start] </td>
+    <td>Departure time. Here, timeStep is the time granularity considered. For example, 900 would mean quarterly granularity, the column header would be 't1_900'. The departure is at the beginning of the quarter. (Therefore excluding the quarter). </td>
+  </tr>
+</table>
+		
+In our initial experiments, we used data collected at an office location parking lot and processed it with the code shared here: https://github.com/lwinschermann/OfficeEVparkingLot
+
+The code is run from the main.py.
+For comparison, the code includes a Gurobi [3] model that can solve the same problem. 
+secondary.py provides some code to combine individual experiments into batches. 
+
+## Past experiments
+Experimental setup December 2023/January 2024
+We conducted runtime experiments for the following parameters:
+
+reps = 500<br>
+instanceSizes = [n for n in range(1,20)] + [n for n in range(20,501,10)] + [n for n in range(600, 1001, 100)] <br>
+timeSteps = [60,900,1800,3600]<br>
+maxFlows = [shortest_augmenting_path, edmonds_karp, preflow_push, dinitz]<br>
+write = True<br>
+randomSample = True <br>
+
+The various timeSteps and maxFlows were run in parallel to speed up copmletion time of all experiments. <br>
+The following CPU times were recorded (using time.process_time()) for experiments x_y, where x is the index of the maxFlow in the list above, and y is the timeSteps value. 
+
+error margin 0.0000001<br>
+0_3600 : 140754<br>
+2_3600 : 147725<br>
+1_3600 : 221068<br>
+0_1800 : 269011<br>
+2_1800 : 279397<br>
+1_1800 : 440793<br>
+2_60   : crashed<br>
+0_900  : 504135<br>
+2_900  : 533992<br>
+0_60   : crashed<br>
+3_3600 : 686641<br>
+1_900  : 935043<br>
+1_60   : crashed<br>
+3_1800 : 1817668<br>
+3_60   : stopped on January 10th 11.03am<br>
+3_900  : stopped on January 10th 11.03am<br>
+error margin 0.000001<br>
+0_60   : stopped on January 10th 11.03am<br>
+1_60   : crashed<br>
+2_60   : crashed<br>
+
+Three experiments were restarted with bigger error margins. They had crashed in earlier experiments. Due to the number of intervals, they encountered divide by zero errors. (Jaay for rounding and accuracy of computers)
+
+For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t utwente d o t nl)
+
+## References
+
+[1] Leoni Winschermann, Marco E.T. Gerards, Antonios Antoniadis, Gerwin Hoogsteen, Johann Hurink. 2023. Relating Electric Vehicle Charging to Speed Scaling with Job-Specific Speed Limits. https://arxiv.org/abs/2309.06174. [currently under peer review] <br>
+[2] Aric A. Hagberg, Daniel A. Schult, and Pieter J. Swart. 2008. Exploring Network Structure, Dynamics, and Function using NetworkX. In Proceedings of the 7th Python in Science Conference, Gaël Varoquaux, Travis Vaught, and Jarrod Millman (Eds.). Pasadena, CA USA, 11 – 15. <br>
+[3] Gurobi Optimization, LLC. 2023. Gurobi Optimizer Reference Manual. https://www.gurobi.com <br>
+
+# Related papers
+
+Leoni Winschermann, Marco E.T. Gerards, Antonios Antoniadis, Gerwin Hoogsteen, Johann Hurink. 2023. Relating Electric Vehicle Charging to Speed Scaling with Job-Specific Speed Limits. https://arxiv.org/abs/2309.06174. [currently under peer review] <br>
