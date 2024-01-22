@@ -61,7 +61,7 @@ In our initial experiments, we used data collected at an office location parking
 See dataGen.py for the code that called upon the other repository and the exact filtering settings.
 
 The code is run from the main.py.
-For comparison, the code includes a Gurobi [3] model that can solve the same problem. 
+For comparison, the code includes a Gurobi [3] model that can solve the same problem. Note that it is misleadingly named lp.py. It is however not a linear program, but a quadratic one in this implementation!
 secondary.py provides some code to combine individual experiments into batches. 
 
 ## Past experiments
