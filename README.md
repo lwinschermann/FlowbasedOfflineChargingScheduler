@@ -16,6 +16,7 @@ This repository holds a proof of concept implementation of FOCS [1].
 ## Code
 The implementation of FOCS heavily relies on the python package networkx [2] for its network structures and maximum flow solvers. 
 Before running it yourself, make sure to check for hard coded paths. We both read and write csv files and the code was build as a proof of concept, not for usability. 
+Furthermore, make sure from the working directory of your code, you add 'data/input/', 'data/output/' and within the latter there should be subdirectories 'flowmethod', 'histograms', 'instances' and 'timesteps'. 
 
 As input, the code requires a csv to read a pandas dataframe from. Each row represents a charging session, or more generally a job in the problem instance. The following headers should be present:
 <table>
@@ -56,7 +57,8 @@ As input, the code requires a csv to read a pandas dataframe from. Each row repr
   </tr>
 </table>
 		
-In our initial experiments, we used data collected at an office location parking lot and processed it with the code shared here: https://github.com/lwinschermann/OfficeEVparkingLot
+In our initial experiments, we used data collected at an office location parking lot and processed it with the code shared here: https://github.com/lwinschermann/OfficeEVparkingLot. 
+See dataGen.py for the code that called upon the other repository and the exact filtering settings.
 
 The code is run from the main.py.
 For comparison, the code includes a Gurobi [3] model that can solve the same problem. 
@@ -73,7 +75,7 @@ maxFlows = [shortest_augmenting_path, edmonds_karp, preflow_push, dinitz]<br>
 write = True<br>
 randomSample = True <br>
 
-The various timeSteps and maxFlows were run in parallel to speed up copmletion time of all experiments. <br>
+The various timeSteps and maxFlows were run in parallel to speed up copmletion time of all experiments. Under 'runtime_experiments/' we added the corresponding main files for those batches. <br>
 The following CPU times were recorded (using time.process_time()) for experiments x_y, where x is the index of the maxFlow in the list above, and y is the timeSteps value. 
 
 error margin 0.0000001<br>
