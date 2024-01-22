@@ -75,7 +75,7 @@ maxFlows = [shortest_augmenting_path, edmonds_karp, preflow_push, dinitz]<br>
 write = True<br>
 randomSample = True <br>
 
-The various timeSteps and maxFlows were run in parallel to speed up copmletion time of all experiments. Under 'runtime_experiments/' we added the corresponding main files for those batches. <br>
+The various timeSteps and maxFlows were run in parallel to speed up copmletion time of all experiments. Under 'runtime_experiments/' we added the corresponding main files for those batches. To run them, you have to move them one repository up. <br>
 The following CPU times were recorded (using time.process_time()) for experiments x_y, where x is the index of the maxFlow in the list above, and y is the timeSteps value. 
 
 error margin 0.0000001<br>
