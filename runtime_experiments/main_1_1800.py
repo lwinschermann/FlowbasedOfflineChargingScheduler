@@ -1,25 +1,3 @@
-#    Flow-based Offline Charging Scheduler (FOCS)
-#    For scheduling of large groups of EVs
-#    Part of SmoothEMS met GridShield project - code developed by 
-#    Leoni Winschermann, University of Twente, l.winschermann@utwente.nl
-#    
-#    Copyright (C) 2024 CAES and MOR Groups, University of Twente, Enschede, The Netherlands
-#
-#    This library is free software; you can redistribute it and/or
-#    modify it under the terms of the GNU Lesser General Public
-#    License as published by the Free Software Foundation; either
-#    version 2.1 of the License, or (at your option) any later version.
-#
-#    This library is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-#    Lesser General Public License for more details.
-#
-#    You should have received a copy of the GNU Lesser General Public
-#    License along with this library; if not, write to the Free Software
-#    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
-#    USA
-
 import networkx as nx
 import copy
 from networkx.algorithms.flow import shortest_augmenting_path
@@ -50,8 +28,8 @@ bk = Bookkeeping()
 idle = 0.01
 reps = 500
 instanceSizes = [n for n in range(1,20)] + [n for n in range(20,501,10)] + [n for n in range(600, 1001, 100)] 
-timeSteps = [60]
-maxFlows = [shortest_augmenting_path]
+timeSteps = [1800]
+maxFlows = [edmonds_karp]
 write = True
 randomSample = True
 
@@ -60,6 +38,7 @@ instanceData = pd.read_excel('data/input/filteredData.xlsx')
 
 timeTotal = time.process_time()
 for maxFlowIndex, maxFlowAlg in enumerate(maxFlows): # algorithm used to determine max flow 
+    maxFlowIndex = 1
     for timeStep in timeSteps: # set interval length. 900 = 15 min intervals, 1 = second-based
         for instanceSize in instanceSizes: # set number of jobs. Sample the last x sessions
             bk.prefix += [str(maxFlowIndex) + "_" + str(timeStep) + "_" + str(instanceSize) + "_"]
@@ -156,7 +135,7 @@ for maxFlowIndex, maxFlowAlg in enumerate(maxFlows): # algorithm used to determi
                     bk.rtFOCSmpctempred += [time.process_time() - startFOCSmpc]
                     bk.solFOCSmpctempred += [bk.rtFOCSmpctempred[-1] - bk.mbFOCSmpctempred[-1]]      
                 else:
-                    pass      
+                    pass     
 
                 print('finish rep ', rep)    
 

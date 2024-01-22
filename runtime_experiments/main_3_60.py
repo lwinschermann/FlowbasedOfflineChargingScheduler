@@ -51,7 +51,7 @@ idle = 0.01
 reps = 500
 instanceSizes = [n for n in range(1,20)] + [n for n in range(20,501,10)] + [n for n in range(600, 1001, 100)] 
 timeSteps = [60]
-maxFlows = [shortest_augmenting_path]
+maxFlows = [dinitz]
 write = True
 randomSample = True
 
@@ -60,6 +60,7 @@ instanceData = pd.read_excel('data/input/filteredData.xlsx')
 
 timeTotal = time.process_time()
 for maxFlowIndex, maxFlowAlg in enumerate(maxFlows): # algorithm used to determine max flow 
+    maxFlowIndex = 3
     for timeStep in timeSteps: # set interval length. 900 = 15 min intervals, 1 = second-based
         for instanceSize in instanceSizes: # set number of jobs. Sample the last x sessions
             bk.prefix += [str(maxFlowIndex) + "_" + str(timeStep) + "_" + str(instanceSize) + "_"]
@@ -156,7 +157,7 @@ for maxFlowIndex, maxFlowAlg in enumerate(maxFlows): # algorithm used to determi
                     bk.rtFOCSmpctempred += [time.process_time() - startFOCSmpc]
                     bk.solFOCSmpctempred += [bk.rtFOCSmpctempred[-1] - bk.mbFOCSmpctempred[-1]]      
                 else:
-                    pass      
+                    pass    
 
                 print('finish rep ', rep)    
 
