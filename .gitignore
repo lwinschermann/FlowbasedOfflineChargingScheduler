@@ -1,0 +1,7 @@
+__pycache__/
+Figures/
+data/
+
+*.csv
+*.txt
+config_path.py
