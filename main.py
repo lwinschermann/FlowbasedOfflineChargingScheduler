@@ -42,7 +42,8 @@ import time
 import random
 
 from LP import LP
-from FOCS import FOCS, FlowNet, FlowOperations, FOCSinstance, Bookkeeping
+from FOCS import FOCS, FlowNet, FlowOperations, FOCSinstance
+from Bookkeeping import Bookkeeping
 
 instanceSize = 10 #number of EVs/jobs in instance
 timeStep = 900 #quarterly granularity
@@ -74,6 +75,7 @@ print('FOCS flow (schedule in middle edge layer): \n', focs.f)
 #instance.toy_instance_2() #overwrites (potentially empty) FOCS instance with toy instance
 #instance.reduced_problem(f, start_h = 12) #creates instance remaining at noon
 #instance.validate_solution(f)
+#flowOp.validate_global_cap()
 #focsMPC.validate_MPC()
 #lp.print_results()
 #focs.write()

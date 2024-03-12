@@ -62,10 +62,11 @@ See dataGen.py for the code that called upon the other repository and the exact 
 
 The code is run from the main.py.
 For comparison, the code includes a Gurobi [3] model that can solve the same problem. Note that it is misleadingly named lp.py. It is however not a linear program, but a quadratic one in this implementation!
-secondary.py provides some code to combine individual experiments into batches. 
+secondary.py provides some code to combine individual experiments into batches. Furthermore, extensions AVR.py and OA.py contain online algorithms for the considered EV scheduling problem.
 
 ## Past experiments
-Experimental setup December 2023/January 2024
+### Runtime experiments
+Experimental setup December 2023/January 2024 <br>
 We conducted runtime experiments for the following parameters:
 
 reps = 500<br>
@@ -101,6 +102,24 @@ error margin 0.000001<br>
 2_60   : crashed<br>
 
 Three experiments were restarted with bigger error margins. They had crashed in earlier experiments. Due to the number of intervals, they encountered divide by zero errors. (Jaay for rounding and accuracy of computers)
+
+For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t utwente d o t nl)
+
+### Competitive ratio experiments
+Experimental setup February 2024 <br>
+We conducted experiments with the following parameters:
+
+reps = 500<br>
+instanceSizes = [400] <br>
+timeSteps = [900]<br>
+maxFlows = [shortest_augmenting_path]<br>
+write = True<br>
+randomSample = True <br>
+
+The goal of the experiments was to put theoretical competitive ratios of two online algorithms into perspective. Here, an online problem is a problem where the existence, departure time, energy requirement and maximum charging power of a job becomes known upon its arrival. Therefore, we make scheduling decisions with the jobs currently available without knowledge of what other jobs may arrive after. <br>
+The first considered online algorithm is Average Rate where upon arrival a job is scheduled at the average power needed to charge its energy requirement before departure. Assuming the 2-norm objective function, this algorithm has a theoretical competitive ratio of 8. <br>
+The second considered online algorithm is Optimal Available where upon arrival the charging of all energy of already available jobs that has not yet been provided is reoptimized and the schedule updated accordingly. Assuming the 2-norm objective function, this algorithm has a theoretical competitive ratio of 4. <br>
+The main file can be found under 'competitive_ratio_experiments/'. 
 
 For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t utwente d o t nl)
 

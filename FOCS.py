@@ -38,6 +38,7 @@ class FOCSinstance:
         self.timeStep = timeStep
         self.timeBase = timeBase
         self.tau = timeStep/timeBase # conversion factor power to energy for one time step
+        self.global_cap_active = False
 
         #initialize jobs
         self.n = len(instanceData) #number of jobs
@@ -55,6 +56,23 @@ class FOCSinstance:
 
         self.find_J_inverse()
         self.find_J()
+
+    def empty_instance(self):
+        self.partial_instance = FOCSinstance(self.data, self.timeStep, self.timeBase)
+        self.partial_instance.jobs = []
+        self.partial_instance.n = 0
+        self.partial_instance.jobs_cap = []
+        self.partial_instance.jobs_demand = []
+
+        self.partial_instance.breakpoints = []
+        self.partial_instance.intervals_start = []
+        self.partial_instance.intervals_end = []
+        self.partial_instance.m = 0
+        self.partial_instance.I_a = [] 
+        self.partial_instance.len_i = []
+
+        self.partial_instance.J_inverse = {}
+        self.partial_instance.J = {}
 
     def reduced_problem(self, flow, start_h, err = 0.0000001):
         #choose breakpoint closest to start
@@ -101,6 +119,29 @@ class FOCSinstance:
         self.find_J()
         return self
 
+    def reduced_problem_mpc(self, flow, start_idx, err = 0.0000001):
+        # demand for all after this timestep
+        supplied = [sum([flow['j'+str(j)]['i'+str(i)] for i in self.J_inverse['j'+str(j)] if i<=start_idx]) for j in self.jobs]
+        self.jobs_demand = [self.jobs_demand[j] - supplied[j] for j in range(0,len(self.jobs))]
+
+        # drop jobs that are completed.
+        jobMask = [(self.jobs_demand[j] > err) for j in range(0,len(self.jobs))]
+
+        # update jobs
+        self.jobs_cap = [self.jobs_cap[j] for j in range(0,len(self.jobs)) if jobMask[j]]
+        self.jobs_demand = [self.jobs_demand[j] for j in range(0,len(self.jobs)) if jobMask[j]]
+        self.jobs = [self.jobs[j] for j in range(0,len(self.jobs)) if jobMask[j]]
+        self.n = len(self.jobs)
+
+        # update intervals
+        self.breakpoints = [self.breakpoints[i] for i in range(0,len(self.breakpoints)) if self.breakpoints[i] >= start_idx]
+        self.intervals_start = self.breakpoints[:-1]
+        self.intervals_end = self.breakpoints[1:]
+        self.m = len(self.intervals_start) #number of atomic intervals
+        self.I_a = [i+start_idx for i in range(0,self.m)] 
+
+        return self
+
     def find_J_inverse(self, startCon = False):
         self.J_inverse = {}
         if not startCon:
@@ -124,6 +165,19 @@ class FOCSinstance:
             self.J["i"+str(i)] = [j for j in self.jobs if i in self.J_inverse["j"+str(j)]]
         return
     
+    def add_capacity(self,cap, constant = True, activate = True):
+        #define list with global maximum powers per interval
+        if constant == True:
+            self.global_cap = [cap for i in self.I_a]
+        else:
+            self.global_cap = cap
+        if len(self.global_cap) != len(self.I_a):
+            print('[WARNING]: global capacity defined for a number of intervals different from the number of active atomic intervals in the problem instance. Check add_capacity() documentation.')
+
+        #turn on constraint
+        self.global_cap_active = activate
+        return
+
     def validate_solution(self,flow_dict, err = 0.0000001):
         print("################################################")
         print("Begin validation of solution")
@@ -282,6 +336,35 @@ class FlowOperations:
         for j in jobs:
             partial_flow["s"]["j{}".format(j)] = sum(partial_flow["j{}".format(j)].values())
         return partial_flow
+    
+    def validate_global_cap(self, G=None, global_cap=None, I_a = None, demand = None, err = 0.00000001):
+        #given a power profile, check that there exists a feasible solution
+        print("################################################")
+        print("Begin validation of feasibility of global power profile")
+        if G is None:
+            G = self.G
+        if global_cap is None:
+            global_cap = self.instance.global_cap
+        if I_a is None:
+            I_a = self.instance.I_a
+        if demand == None:
+            demand = sum([G["s"]["j{}".format(j)]["capacity"] for j in self.instance.jobs])
+
+        #define power capacities
+        for i in I_a:
+            G["i{}".format(i)]["t"]["capacity"] = self.instance.global_cap[i]*self.instance.len_i[i]*self.instance.tau/self.instance.timeStep   
+
+        #run max flow
+        flow_val, flow_dict = nx.maximum_flow(G, "s", "t", flow_func=shortest_augmenting_path)
+
+        #feasibility check
+        if demand - flow_val > err:
+            print('[WARNING]: The demand cannot be met given the defined global power profile and an error margin of ', err)
+        else: 
+            print('[MESSAGE]: There exists a feasible solution given the global power profile')
+        print("################################################")
+        return
+
 
 class FOCS:
     def __init__(self, instance, flowNet, flowOp):
@@ -290,6 +373,7 @@ class FOCS:
         self.flowOp = flowOp
         self.I_p = []
         self.I_a = instance.I_a
+        self.global_cap_active = instance.global_cap_active
 
         self.I_crit = [] #end of each round, save the list of active intervals here
         self.J = instance.J #per interval, specify a list of jobs available
@@ -318,6 +402,11 @@ class FOCS:
             demand_normalized = demand/self.flowOp.length_sum_intervals(self.I_a, self.instance.len_i)         
             for i in self.I_a:
                 G_r["i{}".format(i)]["t"]["capacity"] = demand_normalized * self.instance.len_i[i]
+
+        #if global maximum power constraint is active, trigger it here
+        if self.instance.global_cap_active:
+            for i in self.I_a:
+                G_r["i{}".format(i)]["t"]["capacity"] = min(G_r["i{}".format(i)]["t"]["capacity"], self.instance.global_cap[i]*self.instance.len_i[i]*self.instance.tau/self.instance.timeStep)        
         return G_r
     
     def solve_focs(self, err = 0.0000001, MPCstopper = False, MPCcondition = 0):
@@ -377,7 +466,10 @@ class FOCS:
             else:
                 #initiate next iteration
                 #Determine subcritical sets
-                subCrit_mask = [G_rk["i{}".format(i)]["t"]["capacity"] - flow_dict["i{}".format(i)]["t"] > err for i in self.I_a]
+                if self.instance.global_cap_active:
+                    subCrit_mask = [(G_rk["i{}".format(i)]["t"]["capacity"] - flow_dict["i{}".format(i)]["t"] > err) or (self.instance.global_cap[i]*self.instance.len_i[i]*self.instance.tau/self.instance.timeStep == G_rk["i{}".format(i)]["t"]["capacity"]) for i in self.I_a]
+                else:
+                    subCrit_mask = [G_rk["i{}".format(i)]["t"]["capacity"] - flow_dict["i{}".format(i)]["t"] > err for i in self.I_a]
                 subCrit = [self.I_a[i] for i in range(0,len(self.I_a)) if subCrit_mask[i]]
 
                 #Reduce network G_rk
@@ -479,324 +571,4 @@ class FOCS:
         print("[MESSAGE]: Conclude validation of solution")
         return
     
-class Bookkeeping():
-    def __init__(self):
-        # empty lists to save results in
-        self.prefix = []
-
-        # model building runtimes. Will be a list of lists
-        self.mbLP = []
-        self.mbFOCS = []
-        self.mbFOCSmpc = []
-
-        # solving runtimes. Will be a list of lists
-        self.solLP = []
-        self.solFOCS = []
-        self.solFOCSmpc = []
-
-        # total runtimes. Will be a list of lists
-        self.rtLP = []
-        self.rtFOCS = []
-        self.rtFOCSmpc = []
-
-        # model building runtimes. Will be a list of lists
-        self.mbLP_median = []
-        self.mbFOCS_median = []
-        self.mbFOCSmpc_median = []
-
-        # solving runtimes. Will be a list of lists
-        self.solLP_median = []
-        self.solFOCS_median = []
-        self.solFOCSmpc_median = []
-
-        # total runtimes. Will be a list of lists
-        self.rtLP_median = []
-        self.rtFOCS_median = []
-        self.rtFOCSmpc_median = []
-
-        # objective values
-        self.ovLP = []
-        self.ovFOCS = []
-        self.ovFOCSmpc = []
-        self.ovRatio = []
-
-        ''' for remaining problem case '''
-        # model building runtimes. Will be a list of lists
-        self.mbLPred = []
-        self.mbFOCSred = []
-        self.mbFOCSmpcred = []
-
-        # solving runtimes. Will be a list of lists
-        self.solLPred = []
-        self.solFOCSred = []
-        self.solFOCSmpcred = []
-
-        # total runtimes. Will be a list of lists
-        self.rtLPred = []
-        self.rtFOCSred = []
-        self.rtFOCSmpcred = []
-
-        # model building runtimes. Will be a list of lists
-        self.mbLPred_median = []
-        self.mbFOCSred_median = []
-        self.mbFOCSmpcred_median = []
-
-        # solving runtimes. Will be a list of lists
-        self.solLPred_median = []
-        self.solFOCSred_median = []
-        self.solFOCSmpcred_median = []
-
-        # total runtimes. Will be a list of lists
-        self.rtLPred_median = []
-        self.rtFOCSred_median = []
-        self.rtFOCSmpcred_median = []
-
-        # objective values
-        self.ovLPred = []
-        self.ovFOCSred = []
-        self.ovFOCSmpcred = []
-        self.ovRatiored = []
-    
-    def empty_temp(self):
-        # model building runtimes. Will be a list of lists
-        self.mbLPtemp = []
-        self.mbFOCStemp = []
-        self.mbFOCSmpctemp = []
-
-        # solving runtimes. Will be a list of lists
-        self.solLPtemp = []
-        self.solFOCStemp = []
-        self.solFOCSmpctemp = []
-
-        # total runtimes. Will be a list of lists
-        self.rtLPtemp = []
-        self.rtFOCStemp = []
-        self.rtFOCSmpctemp = []
-
-        ## for partial problem
-        # model building runtimes. Will be a list of lists
-        self.mbLPtempred = []
-        self.mbFOCStempred = []
-        self.mbFOCSmpctempred = []
-
-        # solving runtimes. Will be a list of lists
-        self.solLPtempred = []
-        self.solFOCStempred = []
-        self.solFOCSmpctempred = []
-
-        # total runtimes. Will be a list of lists
-        self.rtLPtempred = []
-        self.rtFOCStempred = []
-        self.rtFOCSmpctempred = []
-    
-    def read_temp(self, path):
-        data = pd.read_csv(path, delimiter=';')
-
-        # model building runtimes. Will be a list of lists
-        self.mbLPtemp += data['mbLP'].tolist()
-        self.mbFOCStemp += data['mbFOCS'].tolist()
-        self.mbFOCSmpctemp += data['mbFOCSmpc'].tolist()
-
-        # solving runtimes. Will be a list of lists
-        self.solLPtemp += data['solLP'].tolist()
-        self.solFOCStemp += data['solFOCS'].tolist()
-        self.solFOCSmpctemp += data['solFOCSmpc'].tolist()
-
-        # total runtimes. Will be a list of lists
-        self.rtLPtemp += data['rtLP'].tolist()
-        self.rtFOCStemp += data['rtFOCS'].tolist()
-        self.rtFOCSmpctemp += data['rtFOCSmpc'].tolist()
-
-    def read_tempred(self, path):
-        data = pd.read_csv(path, delimiter=';')
-
-        # model building runtimes. Will be a list of lists
-        self.mbLPtempred += data['mbLP'].tolist()
-        self.mbFOCStempred += data['mbFOCS'].tolist()
-        self.mbFOCSmpctempred += data['mbFOCSmpc'].tolist()
-
-        # solving runtimes. Will be a list of lists
-        self.solLPtempred += data['solLP'].tolist()
-        self.solFOCStempred += data['solFOCS'].tolist()
-        self.solFOCSmpctempred += data['solFOCSmpc'].tolist()
-
-        # total runtimes. Will be a list of lists
-        self.rtLPtempred += data['rtLP'].tolist()
-        self.rtFOCStempred += data['rtFOCS'].tolist()
-        self.rtFOCSmpctempred += data['rtFOCSmpc'].tolist()
-
-    def write_runtimes_full_problem(self, focs=None, lp=None, focsmpc=None):
-
-        # model building runtimes. Will be a list of lists
-        self.mbLP += [self.mbLPtemp]
-        self.mbFOCS += [self.mbFOCStemp]
-        self.mbFOCSmpc += [self.mbFOCSmpctemp]
-
-        # solving runtimes. Will be a list of lists
-        self.solLP += [self.solLPtemp]
-        self.solFOCS += [self.solFOCStemp]
-        self.solFOCSmpc += [self.solFOCSmpctemp]
-
-        # total runtimes. Will be a list of lists
-        self.rtLP += [self.rtLPtemp]
-        self.rtFOCS += [self.rtFOCStemp]
-        self.rtFOCSmpc += [self.rtFOCSmpctemp]
-
-        # model building runtimes. Will be a list of lists
-        self.mbLP_median += [statistics.median(self.mbLPtemp)]
-        self.mbFOCS_median += [statistics.median(self.mbFOCStemp)]
-        self.mbFOCSmpc_median += [statistics.median(self.mbFOCSmpctemp)]
-
-        # solving runtimes. Will be a list of lists
-        self.solLP_median += [statistics.median(self.solLPtemp)]
-        self.solFOCS_median += [statistics.median(self.solFOCStemp)]
-        self.solFOCSmpc_median += [statistics.median(self.solFOCSmpctemp)]
-
-        # total runtimes. Will be a list of lists
-        self.rtLP_median += [statistics.median(self.rtLPtemp)]
-        self.rtFOCS_median += [statistics.median(self.rtFOCStemp)]
-        self.rtFOCSmpc_median += [statistics.median(self.rtFOCSmpctemp)]
-
-        # objective values
-        if focs is not None:
-            self.ovFOCS += [focs.objective()]
-        if lp is not None:
-            self.ovLP += [lp.model.ObjVal]
-            if focs is not None:
-                self.ovRatio += [lp.model.ObjVal/focs.objective()]
-        if focsmpc is not None:
-            self.ovFOCSmpc +=[focsmpc.objective()]
-        return
-
-    def write_runtimes_partial_problem(self, focs=None, lp=None, focsmpc=None):
-
-        # model building runtimes. Will be a list of lists
-        self.mbLPred += [self.mbLPtempred]
-        self.mbFOCSred += [self.mbFOCStempred]
-        self.mbFOCSmpcred += [self.mbFOCSmpctempred]
-
-        # solving runtimes. Will be a list of lists
-        self.solLPred += [self.solLPtempred]
-        self.solFOCSred += [self.solFOCStempred]
-        self.solFOCSmpcred += [self.solFOCSmpctempred]
-
-        # total runtimes. Will be a list of lists
-        self.rtLPred += [self.rtLPtempred]
-        self.rtFOCSred += [self.rtFOCStempred]
-        self.rtFOCSmpcred += [self.rtFOCSmpctempred]
-
-        # model building runtimes. Will be a list of lists
-        self.mbLPred_median += [statistics.median(self.mbLPtempred)]
-        self.mbFOCSred_median += [statistics.median(self.mbFOCStempred)]
-        self.mbFOCSmpcred_median += [statistics.median(self.mbFOCSmpctempred)]
-
-        # solving runtimes. Will be a list of lists
-        self.solLPred_median += [statistics.median(self.solLPtempred)]
-        self.solFOCSred_median += [statistics.median(self.solFOCStempred)]
-        self.solFOCSmpcred_median += [statistics.median(self.solFOCSmpctempred)]
-
-        # total runtimes. Will be a list of lists
-        self.rtLPred_median += [statistics.median(self.rtLPtempred)]
-        self.rtFOCSred_median += [statistics.median(self.rtFOCStempred)]
-        self.rtFOCSmpcred_median += [statistics.median(self.rtFOCSmpctempred)]
-
-        # objective values
-        if focs is not None:
-            self.ovFOCSred += [focs.objective()]
-        if lp is not None:
-            self.ovLPred += [lp.model.ObjVal]
-            if focs is not None:
-                self.ovRatiored += [lp.model.ObjVal/focs.objective()]
-        if focsmpc is not None:
-            self.ovFOCSmpcred +=[focsmpc.objective()]
-        return
-    
-    def write_instance_to_csv(self, pf = ''):
-        path = 'C:/Users/WinschermannL/OneDrive - University of Twente/Documenten/Gridshield/Criticalintervals/FOCS_code/data/output/instances/'
-        with open(path + 'instance_{}{}.csv'.format(self.prefix[-1], pf), 'w', newline='' ) as f:
-            writer = csv.writer(f, delimiter=';')
-            #header
-            writer.writerow(['mbLP', 'mbFOCS', 'mbFOCSmpc', 'solLP', 'solFOCS', 'solFOCSmpc', 'rtLP', 'rtFOCS', 'rtFOCSmpc'])
-            #content
-            if pf == 'partial':
-                writer.writerows(np.array([self.mbLPtempred, self.mbFOCStempred, self.mbFOCSmpctempred, self.solLPtempred, self.solFOCStempred, self.solFOCSmpctempred, self.rtLPtempred, self.rtFOCStempred, self.rtFOCSmpctempred]).T.tolist())
-            else: 
-                writer.writerows(np.array([self.mbLPtemp, self.mbFOCStemp, self.mbFOCSmpctemp, self.solLPtemp, self.solFOCStemp, self.solFOCSmpctemp, self.rtLPtemp, self.rtFOCStemp, self.rtFOCSmpctemp]).T.tolist())
-            return
-
-
-    def write_timestep_to_csv(self, fc = None, pathOR = None):
-        path = 'C:/Users/WinschermannL/OneDrive - University of Twente/Documenten/Gridshield/Criticalintervals/FOCS_code/data/output/timesteps/'
-        if pathOR is not None:
-            path = pathOR
-        #full
-        pf = 'full'
-        with open(path + 'timeStep_{}_{}.csv'.format(self.prefix[-1].rsplit('_', 2)[0], pf), 'w', newline='' ) as f:
-            writer = csv.writer(f, delimiter=';')
-            if fc is not None:
-                n = len(fc)
-                #header
-                writer.writerow(['n', 'mbLP', 'mbFOCS', 'mbFOCSmpc', 'solLP', 'solFOCS', 'solFOCSmpc', 'rtLP', 'rtFOCS', 'rtFOCSmpc'])
-                #content
-                writer.writerows(np.array([fc, self.mbLP_median[-n:], self.mbFOCS_median[-n:], self.mbFOCSmpc_median[-n:], self.solLP_median[-n:], self.solFOCS_median[-n:], self.solFOCSmpc_median[-n:], self.rtLP_median[-n:], self.rtFOCS_median[-n:], self.rtFOCSmpc_median[-n:]]).T.tolist())
-            else:
-                #header
-                writer.writerow(['mbLP', 'mbFOCS', 'mbFOCSmpc', 'solLP', 'solFOCS', 'solFOCSmpc', 'rtLP', 'rtFOCS', 'rtFOCSmpc'])
-                #content
-                writer.writerows(np.array([self.mbLP_median[-n:], self.mbFOCS_median[-n:], self.mbFOCSmpc_median[-n:], self.solLP_median[-n:], self.solFOCS_median[-n:], self.solFOCSmpc_median[-n:], self.rtLP_median[-n:], self.rtFOCS_median[-n:], self.rtFOCSmpc_median[-n:]]).T.tolist())
-        #partial
-        pf = 'partial'
-        with open(path + 'timeStep_{}_{}.csv'.format(self.prefix[-1].rsplit('_', 2)[0], pf), 'w', newline='' ) as f:
-            writer = csv.writer(f, delimiter=';')
-            if fc is not None:
-                n = len(fc)
-                #header
-                writer.writerow(['n', 'mbLP', 'mbFOCS', 'mbFOCSmpc', 'solLP', 'solFOCS', 'solFOCSmpc', 'rtLP', 'rtFOCS', 'rtFOCSmpc'])
-                #content
-                writer.writerows(np.array([fc, self.mbLPred_median[-n:], self.mbFOCSred_median[-n:], self.mbFOCSmpcred_median[-n:], self.solLPred_median[-n:], self.solFOCSred_median[-n:], self.solFOCSmpcred_median[-n:], self.rtLPred_median[-n:], self.rtFOCSred_median[-n:], self.rtFOCSmpcred_median[-n:]]).T.tolist())
-            else:
-                #header
-                writer.writerow(['mbLP', 'mbFOCS', 'mbFOCSmpc', 'solLP', 'solFOCS', 'solFOCSmpc', 'rtLP', 'rtFOCS', 'rtFOCSmpc'])
-                #content
-                writer.writerows(np.array([self.mbLPred_median[-n:], self.mbFOCSred_median[-n:], self.mbFOCSmpcred_median[-n:], self.solLPred_median[-n:], self.solFOCSred_median[-n:], self.solFOCSmpcred_median[-n:], self.rtLPred_median[-n:], self.rtFOCSred_median[-n:], self.rtFOCSmpcred_median[-n:]]).T.tolist())
-        return
-    
-    def write_flowmethod_to_csv(self, fc = None, sc = None):
-        path = 'C:/Users/WinschermannL/OneDrive - University of Twente/Documenten/Gridshield/Criticalintervals/FOCS_code/data/output/flowmethod/'
-        #full
-        pf = 'full'
-        with open(path + 'flowmethod_{}_{}.csv'.format(self.prefix[-1].rsplit('_')[0], pf), 'w', newline='' ) as f:
-            writer = csv.writer(f, delimiter=';')
-            if (fc is not None) & (sc is not None):
-                n = len(fc)*len(sc)
-                fc2 = fc*len(sc)
-                sc2 = [j for j in sc for i in range(0,len(fc))]
-                #header
-                writer.writerow(['n', 'timestep', 'mbLP', 'mbFOCS', 'mbFOCSmpc', 'solLP', 'solFOCS', 'solFOCSmpc', 'rtLP', 'rtFOCS', 'rtFOCSmpc'])
-                #content
-                writer.writerows(np.array([fc2, sc2, self.mbLP_median[-n:], self.mbFOCS_median[-n:], self.mbFOCSmpc_median[-n:], self.solLP_median[-n:], self.solFOCS_median[-n:], self.solFOCSmpc_median[-n:], self.rtLP_median[-n:], self.rtFOCS_median[-n:], self.rtFOCSmpc_median[-n:]]).T.tolist())
-            else:
-                #header
-                writer.writerow(['mbLP', 'mbFOCS', 'mbFOCSmpc', 'solLP', 'solFOCS', 'solFOCSmpc', 'rtLP', 'rtFOCS', 'rtFOCSmpc'])
-                #content
-                writer.writerows(np.array([self.mbLP_median[-n:], self.mbFOCS_median[-n:], self.mbFOCSmpc_median[-n:], self.solLP_median[-n:], self.solFOCS_median[-n:], self.solFOCSmpc_median[-n:], self.rtLP_median[-n:], self.rtFOCS_median[-n:], self.rtFOCSmpc_median[-n:]]).T.tolist())
-        #partial
-        pf = 'partial'
-        with open(path + 'flowmethod_{}_{}.csv'.format(self.prefix[-1].rsplit('_')[0], pf), 'w', newline='' ) as f:
-            writer = csv.writer(f, delimiter=';')
-            if (fc is not None) & (sc is not None):
-                n = len(fc)*len(sc)
-                fc2 = fc*len(sc)
-                sc2 = [j for j in sc for i in range(0,len(fc))]
-                #header
-                writer.writerow(['n', 'timestep', 'mbLP', 'mbFOCS', 'mbFOCSmpc', 'solLP', 'solFOCS', 'solFOCSmpc', 'rtLP', 'rtFOCS', 'rtFOCSmpc'])
-                #content
-                writer.writerows(np.array([fc2, sc2, self.mbLPred_median[-n:], self.mbFOCSred_median[-n:], self.mbFOCSmpcred_median[-n:], self.solLPred_median[-n:], self.solFOCSred_median[-n:], self.solFOCSmpcred_median[-n:], self.rtLPred_median[-n:], self.rtFOCSred_median[-n:], self.rtFOCSmpcred_median[-n:]]).T.tolist())
-            else:
-                #header
-                writer.writerow(['mbLP', 'mbFOCS', 'mbFOCSmpc', 'solLP', 'solFOCS', 'solFOCSmpc', 'rtLP', 'rtFOCS', 'rtFOCSmpc'])
-                #content
-                writer.writerows(np.array([self.mbLPred_median[-n:], self.mbFOCSred_median[-n:], self.mbFOCSmpcred_median[-n:], self.solLPred_median[-n:], self.solFOCSred_median[-n:], self.solFOCSmpcred_median[-n:], self.rtLPred_median[-n:], self.rtFOCSred_median[-n:], self.rtFOCSmpcred_median[-n:]]).T.tolist())
-        return
-
 
