@@ -67,6 +67,7 @@ secondary.py provides some code to combine individual experiments into batches. 
 ## Past experiments
 ### Runtime experiments
 Experimental setup December 2023/January 2024 <br>
+Run with Python 3.8.8 <br>
 We conducted runtime experiments for the following parameters:
 
 reps = 500<br>
@@ -107,6 +108,7 @@ For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t
 
 ### Competitive ratio experiments
 Experimental setup February 2024 <br>
+Run with Python 3.8.8 <br>
 We conducted experiments with the following parameters:
 
 reps = 500<br>
