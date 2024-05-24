@@ -60,24 +60,8 @@ class OA:
         self.instance.partial_instance.I_a = self.active_intervals(jobs = self.instance.partial_instance.jobs, J_inverse = self.instance.J_inverse, start = start)
         self.instance.partial_instance.len_i = self.instance.len_i#[self.instance.len_i[i] for i in self.instance.partial_instance.I_a]#[(self.instance.partial_instance.intervals_end[i] - self.instance.partial_instance.intervals_start[i])*self.instance.partial_instance.timeStep for i in self.instance.partial_instance.I_a]
 
-        self.find_partial_J_inverse()
-        self.find_partial_J()
-        return
-    
-    def find_partial_J_inverse(self):
-        self.instance.partial_instance.J_inverse = {}
-        #take only those jobs that are in self.instance.partial_instance.jobs
-        for j in self.instance.partial_instance.jobs:
-            #take self.instance.J_inverse and remove intervals after start moment
-            self.instance.partial_instance.J_inverse['j'+str(j)] = [i for i in self.instance.J_inverse['j'+str(j)] if i in self.instance.partial_instance.I_a]
-        return
-
-    def find_partial_J(self):
-        self.instance.partial_instance.J = {}
-        #take only those intervals that are in self.instance.partial_instance.I_a
-        for i in self.instance.partial_instance.I_a:
-            #take self.instance.J and remove jobs that are not in partial instance
-            self.instance.partial_instance.J['i'+str(i)] = [j for j in self.instance.J['i'+str(i)] if j in self.instance.partial_instance.jobs]
+        self.instance.find_partial_J_inverse()
+        self.instance.find_partial_J()
         return
     
     def active_intervals(self, jobs, J_inverse, start = 0):

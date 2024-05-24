@@ -31,14 +31,17 @@ import statistics
 import pandas as pd
 import csv
 import numpy as np
+import random
+import matplotlib.pyplot as plt
 
 class FOCSinstance:
-    def __init__(self, instanceData, timeStep, timeBase = 3600):
+    def __init__(self, instanceData, timeStep, timeBase = 3600, periodicity = False):
         self.data = instanceData
         self.timeStep = timeStep
         self.timeBase = timeBase
         self.tau = timeStep/timeBase # conversion factor power to energy for one time step
         self.global_cap_active = False
+        self.periodicity = periodicity
 
         #initialize jobs
         self.n = len(instanceData) #number of jobs
@@ -47,7 +50,10 @@ class FOCSinstance:
         self.jobs_demand = [instanceData["total_energy_Wh"].iloc[j]/1000 for j in self.jobs]  #in kWh
 
         #initialize intervals
-        self.breakpoints = sorted(instanceData["t0_"+str(timeStep)].append(instanceData["t1_" + str(timeStep)]).drop_duplicates().tolist())
+        #self.breakpoints = sorted(instanceData["t0_"+str(timeStep)].append(instanceData["t1_" + str(timeStep)]).drop_duplicates().tolist())
+        self.breakpoints = sorted(pd.concat([instanceData["t0_"+str(timeStep)], instanceData["t1_" + str(timeStep)]]).drop_duplicates().tolist())
+        if self.periodicity:
+            self.augment_breakpoints()
         self.intervals_start = self.breakpoints[:-1]
         self.intervals_end = self.breakpoints[1:]
         self.m = len(self.intervals_start) #number of atomic intervals
@@ -56,6 +62,13 @@ class FOCSinstance:
 
         self.find_J_inverse()
         self.find_J()
+
+    def augment_breakpoints(self):
+        #number of units of timeStep from first to last breakpoint
+        nr = int(max(self.breakpoints) - min(self.breakpoints))
+        if abs(nr - max(self.breakpoints) + min(self.breakpoints)) > 0.0001:
+            print('[WARNING]: Breakpoints non-integer! Check augment_breakpoints() function in FOCSinstance class.')
+        self.breakpoints = [int(min(self.breakpoints) + bp) for bp in range(0,nr + 1)]
 
     def empty_instance(self):
         self.partial_instance = FOCSinstance(self.data, self.timeStep, self.timeBase)
@@ -73,6 +86,28 @@ class FOCSinstance:
 
         self.partial_instance.J_inverse = {}
         self.partial_instance.J = {}
+
+    #based on a flow, determine the feasible 
+    def feasible_subinstance(self, f, I):
+        # update jobs
+        self.partial_instance.jobs = self.jobs
+        self.partial_instance.n = self.n
+        self.partial_instance.jobs_cap = self.jobs_cap
+        self.partial_instance.jobs_demand = [sum([f['j'+str(j)]['i'+str(i)] for i in self.J_inverse['j'+str(j)] if i in I]) for j in self.jobs]
+
+        # update intervals
+        self.partial_instance.breakpoints = self.breakpoints
+        self.partial_instance.intervals_start = self.breakpoints[:-1]
+        self.partial_instance.intervals_end = self.breakpoints[1:]
+        self.partial_instance.m = len(self.intervals_start) 
+        self.partial_instance.I_a = I
+        self.partial_instance.len_i = self.len_i
+
+        # update J and J_inverse
+        self.find_partial_J_inverse()
+        self.find_partial_J()
+
+        return self.partial_instance
 
     def reduced_problem(self, flow, start_h, err = 0.0000001):
         #choose breakpoint closest to start
@@ -146,6 +181,7 @@ class FOCSinstance:
         self.J_inverse = {}
         if not startCon:
             for j in self.jobs:
+                #print(self.data["t1_"+str(self.timeStep)].iloc[j])
                 self.J_inverse["j"+str(j)] = [i for i in range(self.intervals_start.index(self.data["t0_"+str(self.timeStep)].iloc[j]), self.intervals_end.index(self.data["t1_"+str(self.timeStep)].iloc[j])+1)] 
         else:
             for j in self.jobs:
@@ -164,9 +200,29 @@ class FOCSinstance:
         for i in self.I_a:
             self.J["i"+str(i)] = [j for j in self.jobs if i in self.J_inverse["j"+str(j)]]
         return
+
+    def find_partial_J_inverse(self):
+        self.partial_instance.J_inverse = {}
+        #take only those jobs that are in self.instance.partial_instance.jobs
+        for j in self.partial_instance.jobs:
+            #take self.instance.J_inverse and remove intervals after start moment
+            self.partial_instance.J_inverse['j'+str(j)] = [i for i in self.J_inverse['j'+str(j)] if i in self.partial_instance.I_a]
+        return
+
+    def find_partial_J(self):
+        self.partial_instance.J = {}
+        #take only those intervals that are in self.instance.partial_instance.I_a
+        for i in self.partial_instance.I_a:
+            #take self.instance.J and remove jobs that are not in partial instance
+            self.partial_instance.J['i'+str(i)] = [j for j in self.J['i'+str(i)] if j in self.partial_instance.jobs]
+        return
     
     def add_capacity(self,cap, constant = True, activate = True):
-        #define list with global maximum powers per interval
+        #define list with global maximum powers per interval, in kW/timestep
+        
+        print('[WARNING]: global cap feature broken! Dont use. We set self.global_cap_active to False now.')
+        activate = False
+
         if constant == True:
             self.global_cap = [cap for i in self.I_a]
         else:
@@ -266,6 +322,30 @@ class FOCSinstance:
         self.J = {"i0": [0], "i1": [0,1], "i2": [0]}
         return
 
+    def toy_instance_3(self):
+        #toy instance 2 with periodicity. Result should be entirely flat.
+
+        # overwrite instance with toy example to validate
+        self.timeStep = 900
+        self.timeBase = 3600
+        self.tau = self.timeStep/self.timeBase
+
+        #initialize jobs
+        self.n = 2 #number of jobs
+        self.jobs = [j for j in range(0,self.n)] 
+        self.jobs_cap = [2,2] #in kW
+        self.jobs_demand = [2,2] #in kWh
+
+        #initialize intervals
+        self.breakpoints = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
+        self.intervals_start = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+        self.intervals_end = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
+        self.m = len(self.intervals_start) #number of atomic intervals
+        self.I_a = [i for i in range(0,self.m)]
+        self.len_i = [(self.intervals_end[i] - self.intervals_start[i])*self.timeStep for i in self.I_a]
+        self.J_inverse = {"j0": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], "j1": [4,5,6,7,8,9,10,11]}
+        self.J = {"i0": [0], "i1": [0], "i2": [0], "i3": [0], "i4": [0,1], "i5": [0,1], "i6": [0,1], "i7": [0,1], "i8": [0,1], "i9": [0,1], "i10": [0,1], "i11": [0,1], "i12": [0], "i13": [0], "i14": [0], "i15": [0]}
+
 class FlowNet:
     def __init__(self):
         self.G = nx.DiGraph()
@@ -307,6 +387,23 @@ class FlowOperations:
         for (u,v) in G2.edges:
             flow1[u][v] += flow2[u][v]
         return flow1
+    
+    #adding price to focs flows
+    def add_price_to_focs_flow(self,flow1,flow2,G1,G2):
+        for (u,v) in G2.edges:
+            try:
+                flow1[u][v] += flow2[u][v]
+            except:
+                # print('sanity check only edges through c-nodes are skipped: ', u,'\t',v)
+                pass
+        # make feasible - incoming flow in t:
+        for u in G1.nodes:
+            if (u,'t') in G1.edges:
+                temp = 0
+                for v in G1.nodes:
+                    if (v,u) in G1.edges:
+                        temp += flow1[v][u]
+                flow1[u]['t'] = temp
 
     #Reduce flow network by critical flow
     def reduce_network(self,Gr,fr_dict,I_critr):

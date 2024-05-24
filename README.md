@@ -62,7 +62,7 @@ See dataGen.py for the code that called upon the other repository and the exact 
 
 The code is run from the main.py.
 For comparison, the code includes a Gurobi [3] model that can solve the same problem. Note that it is misleadingly named lp.py. It is however not a linear program, but a quadratic one in this implementation!
-secondary.py provides some code to combine individual experiments into batches. Furthermore, extensions AVR.py and OA.py contain online algorithms for the considered EV scheduling problem.
+secondary.py provides some code to combine individual experiments into batches. Furthermore, extensions AVR.py and OA.py contain online algorithms for the considered EV scheduling problem. Price.py provides an extension that incorporates CO2 objectives, both in itself and as a weighted combination with the flattening objective.
 
 ## Past experiments
 ### Runtime experiments
@@ -124,6 +124,19 @@ The second considered online algorithm is Optimal Available where upon arrival t
 The main file can be found under 'competitive_ratio_experiments/'. 
 
 For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t utwente d o t nl)
+
+### Carbon steering experiments
+Experimental setup April 2024 <br>
+Run with Python 3.11.7 <br>
+We conducted experiments with the following parameters:
+
+timeSteps = [900]<br>
+maxFlows = [shortest_augmenting_path]
+
+The used data stems from an electric bus charging hub. Therefore, an additional data processing file is included in carbon_steering_experiments/busses.py. The goal of the experiments was to validate a transform applied to incorporate carbon steering (similarly price steering) objectives in weighted combination with the original flattening objective into FOCS. Furthermore, the tradeoff between flatness and carbon intensity or the resulting schedule may be investigated based on the weights attached to either objective. <br>
+The main file can be found under 'carbon_steering_experiments/'
+
+For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t utwente d o t nl) or Leander van der Bijl (L d o t C d o t vanderBijl a t utwente d o t nl)
 
 ## References
 
