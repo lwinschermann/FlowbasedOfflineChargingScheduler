@@ -128,6 +128,7 @@ For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t
 ### Carbon steering experiments
 Experimental setup April 2024 <br>
 Run with Python 3.11.7 <br>
+Initial commit d4812cb <br>
 We conducted experiments with the following parameters:
 
 timeSteps = [900]<br>
