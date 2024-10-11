@@ -139,6 +139,28 @@ The main file can be found under 'carbon_steering_experiments/'
 
 For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t utwente d o t nl) or Leander van der Bijl (L d o t C d o t vanderBijl a t utwente d o t nl)
 
+### Guarantee experiments
+Experimental setup September 2024 <br>
+Run with Python 3.11.7 <br>
+Initial commit 1638865 <br>
+We conducted experiments with the following parameters:
+
+reps = 500 <br>
+timeSteps = [900]<br>
+instanceSizes = [n for n in range(1,50)] + [5*n for n in range(10,81)] + [500, 1000, 10000] <br>
+maxFlows = [shortest_augmenting_path] <br>
+write = True <br>
+randomSample = True <br>
+
+The goal of the experiments was to validate a generalization of FOCS that among others is able to include charging guarantees in the schedule.
+
+Under 'guarantee_experiments/' we added the corresponding main file. To run it, you have to move it one repository up. <br>
+For each instance size, we run the regular FOCS setup, then the extended model with charging guarantee 23 kWh by 4pm and then the extended model with charging guarantees 15 kWh by noon and 23 kWh by 4pm.  
+The experiment may be divided into two parts. First, we run instance size 400 separately and record the resulting power profiles. Secondly, we run all instance sizes and record the CPU times (using time.process_time()). 
+For the first part, we additionally generate a power profile for the uncontrolled case (i.e., EVs charge at full power from their arrival till they either leave or satisfy their charging demand).
+
+For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t utwente d o t nl)
+
 ## References
 
 [1] Leoni Winschermann, Marco E.T. Gerards, Antonios Antoniadis, Gerwin Hoogsteen, Johann Hurink. 2023. Relating Electric Vehicle Charging to Speed Scaling with Job-Specific Speed Limits. https://arxiv.org/abs/2309.06174. [currently under peer review] <br>
@@ -149,3 +171,5 @@ For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t
 
 Leoni Winschermann, Marco E.T. Gerards, Antonios Antoniadis, Gerwin Hoogsteen, Johann Hurink. 2023. Relating Electric Vehicle Charging to Speed Scaling with Job-Specific Speed Limits. https://arxiv.org/abs/2309.06174. [currently under peer review] <br>
 Leoni Winschermann, Marco E.T. Gerards, Johann Hurink. 2024. Improving the Optimization in Model Predictive Controllers: Scheduling Large Groups of Electric Vehicles. https://arxiv.org/abs/2403.16622. [currently under peer review] <br>
+Leoni Winschermann, Leander van der Bijl, Marco E.T. Gerards, Johann Hurink. 2024. [title omitted as review is double blind] [currently under peer review] <br>
+Leoni Winschermann, Mario Günzel, Kuan-Hsun Chen, Johann Hurink. 2024. [title omitted as review is double blind] [currently under peer review] <br>
