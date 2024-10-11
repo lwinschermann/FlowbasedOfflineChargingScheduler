@@ -53,6 +53,8 @@ class Bookkeeping():
         self.rtLP = []
         self.rtFOCS = []
         self.rtFOCSmpc = []
+        self.rtFULPES1 = []
+        self.rtFULPES2 = []
 
         # model building runtimes. Will be a list of lists
         self.mbLP_median = []
@@ -68,6 +70,8 @@ class Bookkeeping():
         self.rtLP_median = []
         self.rtFOCS_median = []
         self.rtFOCSmpc_median = []
+        self.rtFULPES1_median = []
+        self.rtFULPES2_median = []
 
         # objective values
         self.ovLP = []
@@ -81,6 +85,7 @@ class Bookkeeping():
 
         # power profiles
         self.power_profiles = pd.DataFrame({'i': []})
+        self.agg_power_profiles = []
 
         ''' for remaining problem case '''
         # model building runtimes. Will be a list of lists
@@ -134,6 +139,8 @@ class Bookkeeping():
         self.rtLPtemp = []
         self.rtFOCStemp = []
         self.rtFOCSmpctemp = []
+        self.rtFULPES1temp = []
+        self.rtFULPES2temp = []
 
         ## for partial problem
         # model building runtimes. Will be a list of lists
@@ -203,21 +210,27 @@ class Bookkeeping():
         self.rtLP += [self.rtLPtemp]
         self.rtFOCS += [self.rtFOCStemp]
         self.rtFOCSmpc += [self.rtFOCSmpctemp]
+        self.rtFULPES1 += [self.rtFULPES1temp]
+        self.rtFULPES2 += [self.rtFULPES2temp]
 
-        # model building runtimes. Will be a list of lists
-        self.mbLP_median += [statistics.median(self.mbLPtemp)]
-        self.mbFOCS_median += [statistics.median(self.mbFOCStemp)]
-        self.mbFOCSmpc_median += [statistics.median(self.mbFOCSmpctemp)]
+        if len(self.mbLPtemp) > 0:
+            # model building runtimes. Will be a list of lists
+            self.mbLP_median += [statistics.median(self.mbLPtemp)]
+            self.mbFOCS_median += [statistics.median(self.mbFOCStemp)]
+            self.mbFOCSmpc_median += [statistics.median(self.mbFOCSmpctemp)]
 
-        # solving runtimes. Will be a list of lists
-        self.solLP_median += [statistics.median(self.solLPtemp)]
-        self.solFOCS_median += [statistics.median(self.solFOCStemp)]
-        self.solFOCSmpc_median += [statistics.median(self.solFOCSmpctemp)]
+            # solving runtimes. Will be a list of lists
+            self.solLP_median += [statistics.median(self.solLPtemp)]
+            self.solFOCS_median += [statistics.median(self.solFOCStemp)]
+            self.solFOCSmpc_median += [statistics.median(self.solFOCSmpctemp)]
 
-        # total runtimes. Will be a list of lists
-        self.rtLP_median += [statistics.median(self.rtLPtemp)]
+            # total runtimes. Will be a list of lists
+            self.rtLP_median += [statistics.median(self.rtLPtemp)]
+            self.rtFOCSmpc_median += [statistics.median(self.rtFOCSmpctemp)]
         self.rtFOCS_median += [statistics.median(self.rtFOCStemp)]
-        self.rtFOCSmpc_median += [statistics.median(self.rtFOCSmpctemp)]
+        if len(self.rtFULPES1temp)>0:
+            self.rtFULPES1_median += [statistics.median(self.rtFULPES1temp)]
+            self.rtFULPES2_median += [statistics.median(self.rtFULPES2temp)]
 
         # objective values
         if focs is not None:
@@ -357,6 +370,34 @@ class Bookkeeping():
                 writer.writerows(np.array([self.mbLPtemp, self.mbFOCStemp, self.mbFOCSmpctemp, self.solLPtemp, self.solFOCStemp, self.solFOCSmpctemp, self.rtLPtemp, self.rtFOCStemp, self.rtFOCSmpctemp]).T.tolist())
             return
 
+    def write_fulpes_instance_to_csv(self, pf = ''):
+        path = 'C:/Users/WinschermannL/OneDrive - University of Twente/Documenten/Gridshield/Criticalintervals/FOCS_code/data/output/fulpes/'
+        with open(path + 'fulpes_instance_{}.csv'.format(pf), 'w', newline='' ) as f:
+            writer = csv.writer(f, delimiter=';')
+            #header
+            writer.writerow(['rtFOCS', 'rtFULPES1', 'rtFULPES2'])
+            #content
+            writer.writerows(np.array([self.rtFOCStemp, self.rtFULPES1temp, self.rtFULPES2temp]).T.tolist())
+            return
+        
+    def write_fulpes_to_csv(self,pf = '', pathOR = None, fc = None):
+        path = 'C:/Users/WinschermannL/OneDrive - University of Twente/Documenten/Gridshield/Criticalintervals/FOCS_code/data/output/fulpes/'
+        if pathOR is not None:
+            path = pathOR
+        with open(path + 'fulpes_median_{}.csv'.format(pf), 'w', newline='' ) as f:
+            writer = csv.writer(f, delimiter=';')
+            if fc is not None:
+                n = len(fc)
+                #header
+                writer.writerow(['n', 'rtFOCS', 'rtFULPES1', 'rtFULPES2'])
+                #content
+                writer.writerows(np.array([fc, self.rtFOCS_median[-n:], self.rtFULPES1_median[-n:], self.rtFULPES2_median[-n:], ]).T.tolist())
+            else:
+                #header
+                writer.writerow(['rtFOCS', 'rtFULPES1', 'rtFULPES2'])
+                #content
+                writer.writerows(np.array([self.rtFOCS_median[-n:], self.rtFULPES1_median[-n:], self.rtFULPES2_median[-n:], ]).T.tolist())
+        
 
     def write_timestep_to_csv(self, fc = None, pathOR = None):
         path = 'C:/Users/WinschermannL/OneDrive - University of Twente/Documenten/Gridshield/Criticalintervals/FOCS_code/data/output/timesteps/'

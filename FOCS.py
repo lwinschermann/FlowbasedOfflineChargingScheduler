@@ -35,25 +35,37 @@ import random
 import matplotlib.pyplot as plt
 
 class FOCSinstance:
-    def __init__(self, instanceData, timeStep, timeBase = 3600, periodicity = False):
+    def __init__(self, instanceData, timeStep, timeBase = 3600, periodicity = False, cumprob=False, prob_t0='', prob_t1=''):
         self.data = instanceData
         self.timeStep = timeStep
         self.timeBase = timeBase
         self.tau = timeStep/timeBase # conversion factor power to energy for one time step
         self.global_cap_active = False
         self.periodicity = periodicity
+        self.cumprob = cumprob
+        self.prob_t0 = prob_t0
+        self.prob_t1 = prob_t1
+        self.milestones_active = False
+        self.milestones = None
 
         #initialize jobs
         self.n = len(instanceData) #number of jobs
         self.jobs = [j for j in range(0,self.n)] 
         self.jobs_cap = [22 if instanceData["average_power_W"].iloc[j]>instanceData["maxPower"].iloc[j] else instanceData["maxPower"].iloc[j]/1000 for j in self.jobs] # in W
         self.jobs_demand = [instanceData["total_energy_Wh"].iloc[j]/1000 for j in self.jobs]  #in kWh
+        self.jobs_departure = [instanceData["t1_" + str(timeStep)+str(prob_t1)].iloc[j] for j in self.jobs]
+        self.jobs_arrival = [instanceData["t0_" + str(timeStep)+str(prob_t0)].iloc[j] for j in self.jobs]
 
         #initialize intervals
         #self.breakpoints = sorted(instanceData["t0_"+str(timeStep)].append(instanceData["t1_" + str(timeStep)]).drop_duplicates().tolist())
-        self.breakpoints = sorted(pd.concat([instanceData["t0_"+str(timeStep)], instanceData["t1_" + str(timeStep)]]).drop_duplicates().tolist())
+        #self.breakpoints = sorted(instanceData["t0_"+str(timeStep)]._append(instanceData["t1_" + str(timeStep)]).drop_duplicates().tolist())
+        # self.breakpoints = sorted(pd.concat([instanceData["t0_"+str(timeStep)], instanceData["t1_" + str(timeStep)]]).drop_duplicates().tolist())
+        self.breakpoints = sorted(instanceData["t0_"+str(timeStep)+str(prob_t0)]._append(instanceData["t1_" + str(timeStep)+str(prob_t1)]).drop_duplicates().tolist())
         if self.periodicity:
             self.augment_breakpoints()
+            if self.cumprob:
+                # ! only in data for 900s timeSteps. In this setup, only works for simulation of 1 day.
+                self.jobs_cumprob = [[instanceData['cumprob_i'+str(i+1)].iloc[j] for i in range(self.breakpoints[0],self.breakpoints[-1])] for j in self.jobs]
         self.intervals_start = self.breakpoints[:-1]
         self.intervals_end = self.breakpoints[1:]
         self.m = len(self.intervals_start) #number of atomic intervals
@@ -62,6 +74,88 @@ class FOCSinstance:
 
         self.find_J_inverse()
         self.find_J()
+
+    def add_milestones(self, milestones = None, activate = True):
+        self.milestones_active = activate
+        if milestones is None:
+            # add asr milestones: 23kWh by 4pm (if quarters then by quarter 64)
+            self.milestones = [[[23,64]] for j in self.jobs] # if multiple guarantees, energy is additive!
+        else:
+            # add milestones
+            self.milestones = milestones
+            if len(self.milestones) != self.n:
+                print('[WARNING]: milestones should have format list with #jobs entries and each jobs entry a list of lists of the form [energy(aggregated), deadline].')
+
+    def milestones_to_segments(self, toy=False):
+        if self.milestones is None:
+            print('[WARNING]: You are trying to use segmentation, but have not defined milestones...')
+        self.segments = []
+        for j in self.jobs:
+            segments_j = self.milestones[j]
+
+            # if an EV departs way before the milestone, we adapt the segment to charge as much as HAS to be charged before departure, so that it would have been possible to charge the entire guarantee by the milestone.
+            # NOTE Design choice. May as well have chosen to charge to as close as possible to the guarantee (full power till departure)
+            feas_j = [max(0,stone[0] - max(0,stone[1]-self.jobs_departure[j])*self.jobs_cap[j]*self.tau ) for stone in segments_j]
+
+            # ensure milestone feasibility
+            # NOTE we also capped milestones at the demand of the vehicle, and at what is feasibly possible before the milestone deadline
+            segments_j = [[min(stone[0], feas_j[id], self.jobs_demand[j], max(0,(stone[1]-self.jobs_arrival[j])*self.jobs_cap[j]*self.tau)), stone[1]] for id,stone in enumerate(segments_j)]
+
+            # check if we need to add a segment with the actual departure
+            if max([0]+[segment[0] for segment in segments_j if segment[1] <= self.jobs_departure[j]]) < self.jobs_demand[j]:
+                segments_j += [[self.jobs_demand[j],self.jobs_departure[j]]]
+            
+            # sort based on deadline
+            segments_j = sorted(segments_j, key=lambda x: x[1])
+
+            # make non-additive
+            temp_segments_j = copy.deepcopy(segments_j) # or else overwrite the previous entries already before fixing the next
+            for id in range(1,len(segments_j)):
+                segments_j[id][0] = max(0,temp_segments_j[id][0] - temp_segments_j[id-1][0])
+            
+            # drop zero-demand jobs. Else get errors in heuristic 1.
+            segments_j = [segment for segment in segments_j if segment[0]>0]
+
+            self.segments += [segments_j]
+        if not toy:
+            self.find_seg_J_inverse()
+            self.find_seg_J()
+        
+            # transform milestones into segments
+            self.seg_n = [len(self.segments[j]) for j in self.jobs] #number of segments
+            self.seg_jobs = [[id for id,k in enumerate(self.segments[j])] for j in self.jobs]
+            self.seg_jobs_demand = [[milestone[0] for milestone in self.segments[j]] for j in self.jobs]
+        
+        # do segment adaptations to instance
+        self.parent_instance = copy.deepcopy(self)
+        self.parent_jobs = [j for j in self.jobs for k in self.seg_jobs[j]]
+        self.jobs = [j for j in range(0,len(self.parent_jobs))]
+        self.jobs_demand = [dem for j in self.parent_instance.jobs for dem in self.seg_jobs_demand[j]]
+        self.jobs_cap = [self.jobs_cap[j] for j in self.parent_instance.jobs for k in self.seg_jobs_demand[j]]
+        
+        self.J_inverse = {}
+        for j in self.jobs:
+            self.J_inverse["j"+str(j)] = self.parent_instance.seg_J_inverse["j"+str(self.parent_jobs[j])+str("-"+str(self.parent_jobs[:j].count(self.parent_jobs[j])))] 
+        self.find_J()
+        
+        return 
+
+    def find_seg_J_inverse(self):
+        # example: self.seg_J_inverse = {"j0-1": [0,1], "j0-1": [0,1,2], "j1-0": [0], "j1-1": [0,1,2]}
+        self.seg_J_inverse = {}
+        for j in self.jobs:
+            for idx, segment in enumerate(self.segments[j]):
+                self.seg_J_inverse["j"+str(j)+"-"+str(idx)] = [i for i in self.J_inverse["j"+str(j)] if i < self.breakpoints.index(segment[1])]
+        return
+    
+    def find_seg_J(self):
+        self.seg_J = {}
+        for i in self.I_a:
+            self.seg_J["i"+str(i)] = {}
+            for j in self.J["i"+str(i)]:
+                self.seg_J["i"+str(i)][j] = [id for id,k in enumerate(self.segments[j]) if i in self.seg_J_inverse["j"+str(j)+"-"+str(id)]]
+        return
+
 
     def augment_breakpoints(self):
         #number of units of timeStep from first to last breakpoint
@@ -181,18 +275,17 @@ class FOCSinstance:
         self.J_inverse = {}
         if not startCon:
             for j in self.jobs:
-                #print(self.data["t1_"+str(self.timeStep)].iloc[j])
-                self.J_inverse["j"+str(j)] = [i for i in range(self.intervals_start.index(self.data["t0_"+str(self.timeStep)].iloc[j]), self.intervals_end.index(self.data["t1_"+str(self.timeStep)].iloc[j])+1)] 
+                self.J_inverse["j"+str(j)] = [i for i in range(self.intervals_start.index(self.data["t0_"+str(self.timeStep)+self.prob_t0].iloc[j]), self.intervals_end.index(self.data["t1_"+str(self.timeStep)+self.prob_t1].iloc[j])+1)] 
         else:
             for j in self.jobs:
                 try:
-                    temp = self.intervals_start.index(self.data["t0_"+str(self.timeStep)].iloc[j])
+                    temp = self.intervals_start.index(self.data["t0_"+str(self.timeStep)+self.prob_t0].iloc[j])
                 except:
-                    if self.data["t0_"+str(self.timeStep)].iloc[j] < min(self.intervals_start):
+                    if self.data["t0_"+str(self.timeStep)+self.prob_t0].iloc[j] < min(self.intervals_start):
                         temp = 0
                     else: 
                         print('[WARNING]: Unconsidered case. Check find_J_inverse() function in FOCSinstance class.')
-                self.J_inverse["j"+str(j)] = [i for i in range(temp, self.intervals_end.index(self.data["t1_"+str(self.timeStep)].iloc[j])+1)] 
+                self.J_inverse["j"+str(j)] = [i for i in range(temp, self.intervals_end.index(self.data["t1_"+str(self.timeStep)+self.prob_t1].iloc[j])+1)] 
         return
 
     def find_J(self):
@@ -346,6 +439,68 @@ class FOCSinstance:
         self.J_inverse = {"j0": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], "j1": [4,5,6,7,8,9,10,11]}
         self.J = {"i0": [0], "i1": [0], "i2": [0], "i3": [0], "i4": [0,1], "i5": [0,1], "i6": [0,1], "i7": [0,1], "i8": [0,1], "i9": [0,1], "i10": [0,1], "i11": [0,1], "i12": [0], "i13": [0], "i14": [0], "i15": [0]}
 
+    def toy_instance_4(self):
+        # overwrite instance with toy example to validate
+        self.timeStep = 3600
+        self.tau = self.timeStep/3600
+
+        #initialize jobs
+        self.n = 2 #number of jobs
+        self.jobs = [j for j in range(0,self.n)] 
+        self.jobs_cap = [4,4]
+        self.jobs_demand = [6,6]
+
+        #segments
+        self.seg_n = [2,2] #number of segments
+        self.seg_jobs = [[0,1],[0,1]]
+        self.seg_jobs_demand = [[4.5,1.5],[3,3]]
+
+        #initialize intervals
+        self.breakpoints = [0,1,2,3]
+        self.intervals_start = [0,1,2]
+        self.intervals_end = [1,2,3]
+        self.m = len(self.intervals_start) #number of atomic intervals
+        self.I_a = [i for i in range(0,self.m)]
+        self.len_i = [(self.intervals_end[i] - self.intervals_start[i])*self.timeStep for i in self.I_a]
+
+        self.J_inverse = {"j0": [0,1,2], "j1": [0,1,2]}
+        self.J = {"i0": [0,1], "i1": [0,1], "i2": [0,1]}
+
+        self.seg_J_inverse = {"j0-0": [0,1], "j0-1": [0,1,2], "j1-0": [0], "j1-1": [0,1,2]}
+        self.seg_J = {"i0": {0: [0,1], 1: [0,1]}, "i1": {0: [0,1], 1: [1]}, "i2": {0:[1], 1:[1]}}
+        return
+    
+    def toy_instance_5(self):
+        # overwrite instance with toy example to validate
+        self.timeStep = 3600
+        self.tau = self.timeStep/3600
+
+        #initialize jobs
+        self.n = 1 #number of jobs
+        self.jobs = [j for j in range(0,self.n)] 
+        self.jobs_cap = [4]
+        self.jobs_demand = [4]
+
+        #segments
+        self.seg_n = [2] #number of segments
+        self.seg_jobs = [[0,1]]
+        self.seg_jobs_demand = [[3,1]]
+
+        #initialize intervals
+        self.breakpoints = [0,1,2]
+        self.intervals_start = [0,1]
+        self.intervals_end = [1,2]
+        self.m = len(self.intervals_start) #number of atomic intervals
+        self.I_a = [i for i in range(0,self.m)]
+        self.len_i = [(self.intervals_end[i] - self.intervals_start[i])*self.timeStep for i in self.I_a]
+
+        self.J_inverse = {"j0": [0,1]}
+        self.J = {"i0": [0], "i1": [0]}
+
+        self.seg_J_inverse = {"j0-0": [0], "j0-1": [0,1]}
+        self.seg_J = {"i0": {0: [0,1]}, "i1": {0: [1]}}
+        return
+
 class FlowNet:
     def __init__(self):
         self.G = nx.DiGraph()
@@ -356,13 +511,71 @@ class FlowNet:
 
         #add edges
         #later, initialize without edges to t and add those based on known capacity
-        #can we use capacity function?
         self.G.add_edges_from(
                             [("s", "j"+str(j), {"capacity": instance.jobs_demand[instance.jobs.index(j)]}) for j in instance.jobs]   #D_s
                         +  sum([[("j"+str(j), "i"+str(i), {"capacity": instance.jobs_cap[instance.jobs.index(j)]*instance.len_i[i]/instance.timeBase}) for i in instance.J_inverse["j"+str(j)]] for j in instance.jobs],[])   #D_0
                         +  [("i"+str(i), "t") for i in instance.I_a] #D_t
                         )
+        
+    def focs_solution_to_network(self, instance, f, err = 0.000001, how = 'linear', factor = 1000, structure = "focs"):
+        #make empty network
+        if structure == "focs":
+            self.focs_instance_to_network(instance)
+            self.G_sched = copy.deepcopy(self.G)
+        elif structure == "segment":
+            self.segment_instance_to_network(instance)
+            self.G_sched = copy.deepcopy(self.G_seg)
+        else: 
+            print("[WARNING]: structure undefined. Try focs or segment.")
+        # self.G_sched = copy.deepcopy(self.G)
+        #add capacities corresponding to focs.f solution
+        for i in instance.I_a:
+            self.G_sched['i'+str(i)]['t']['capacity'] = f['i'+str(i)]['t']
 
+        #per job, determine costs 
+        if not instance.periodicity:
+            print('[WARNING]: the method does not normalize for interval lengths. Periodicity assumed and detected as False.')   
+        if structure == "focs":
+            for j in instance.jobs:
+                n_min = int(instance.jobs_demand[j]/(instance.tau*instance.jobs_cap[j])) #rounded minimal number of intervals needed for charging
+                n_slack = len(instance.J_inverse['j'+str(j)][n_min+1:])
+                for i_id, i in enumerate(instance.J_inverse['j'+str(j)][n_min+1:]):
+                    if how == 'linear':
+                        self.G_sched['j'+str(j)]['i'+str(i)]['weight'] = i_id + 1
+                    elif how == 'quadratic':
+                        self.G_sched['j'+str(j)]['i'+str(i)]['weight'] = int((i_id + 1)**2)
+                    elif how == 'linear_proportional':
+                        self.G_sched['j'+str(j)]['i'+str(i)]['weight'] = int(factor*(i_id +1) /(n_slack))
+                    elif how == 'quadratic_proportional':
+                        self.G_sched['j'+str(j)]['i'+str(i)]['weight'] = int(factor*(i_id +1)**2 /(n_slack))
+                    elif how == 'probabilistic':
+                        self.G_sched['j'+str(j)]['i'+str(i)]['weight'] = int(factor/(instance.jobs_cumprob[j][i]+err))
+                    elif how == 'probabilistic_full':
+                        for i in instance.J_inverse['j'+str(j)]:
+                            self.G_sched['j'+str(j)]['i'+str(i)]['weight'] = int(factor/(instance.jobs_cumprob[j][i]+err))
+                        break                    
+                    else:
+                        print('[WARNING]: how undefined. Try \'linear\' or \'quadratic\'. No weight assigned.')
+                        print('how = ', how)
+        #add demands
+        demand = sum([self.G_sched['s']['j'+str(j)]['capacity'] for j in instance.jobs]) - err
+        nx.set_node_attributes(self.G_sched, {'s': - demand, 't': demand}, name = 'demand')
+
+        return self.G_sched
+
+    def segment_instance_to_network(self,instance):
+        self.G_seg = nx.DiGraph()
+        # add nodes
+        self.G_seg.add_nodes_from(["s"] + ["j"+str(j) for j in instance.jobs] + ["p"+str(p)+"i"+str(i) for i in instance.I_a for p in instance.parent_instance.J['i'+str(i)]] + ["i"+str(i) for i in instance.I_a] + ["t"])
+
+        # add edges
+        self.G_seg.add_edges_from(
+                        [("s", "j"+str(j), {"capacity": instance.jobs_demand[instance.jobs.index(j)]}) for j in instance.jobs]   #D_0
+                        +  sum([[("j"+str(j), "p"+str(instance.parent_jobs[j])+"i"+str(i), {"capacity": instance.jobs_cap[instance.jobs.index(j)]*instance.len_i[i]/instance.timeBase}) for i in instance.J_inverse["j"+str(j)]] for j in instance.jobs],[])   #D_1
+                        +  sum([[("p"+str(p)+"i"+str(i), "i"+str(i), {"capacity": instance.parent_instance.jobs_cap[instance.parent_instance.jobs.index(p)]*instance.len_i[i]/instance.timeBase}) for i in instance.parent_instance.J_inverse["j"+str(p)]] for p in instance.parent_instance.jobs],[])   #D_2
+                        +  [("i"+str(i), "t") for i in instance.I_a] #D_t
+                        )
+                        
 class FlowOperations:
     def __init__(self, G, instance):
         self.G = G
@@ -422,16 +635,29 @@ class FlowOperations:
     def length_sum_intervals(self,I_list, L_list):
         return sum([L_list[i] for i in I_list])
 
-    def partial_flow(self,full_flow, node_set, intervals, jobs, J):
+    def partial_flow(self,full_flow, node_set, intervals, jobs, J, structure = "focs", parent_J = {}, parent_jobs = []):
         partial_flow = copy.deepcopy(full_flow)
-        for i in intervals:
-            if i not in node_set:
-                partial_flow["i{}".format(i)]["t"] = 0
-                for j in J["i" + str(i)]:
-                    #FIXME double check definition J[i]. Need to update function if we remove nodes... Active jobs only.
-                    partial_flow["j{}".format(j)]["i{}".format(i)] = 0
-        for j in jobs:
-            partial_flow["s"]["j{}".format(j)] = sum(partial_flow["j{}".format(j)].values())
+        if structure == "focs":
+            for i in intervals:
+                if i not in node_set:
+                    partial_flow["i{}".format(i)]["t"] = 0
+                    for j in J["i" + str(i)]:
+                        #FIXME double check definition J[i]. Need to update function if we remove nodes... Active jobs only.
+                        partial_flow["j{}".format(j)]["i{}".format(i)] = 0
+            for j in jobs:
+                partial_flow["s"]["j{}".format(j)] = sum(partial_flow["j{}".format(j)].values())
+        elif structure == "segment":
+            for i in intervals:
+                if i not in node_set: #node set = critical intervals
+                    partial_flow["i"+str(i)]["t"] = 0
+                    for p in parent_J["i" + str(i)]:
+                        partial_flow["p"+str(p)+"i"+str(i)]["i" + str(i)] = 0
+                    for j in J["i"+str(i)]:
+                        partial_flow["j"+str(j)]["p"+str(parent_jobs[j])+"i"+str(i)] = 0
+            for j in jobs:
+                partial_flow["s"]["j"+str(j)] = sum(partial_flow["j"+str(j)].values())
+        else:
+            print("[WARNING]: structure for partial flow unknown. Try focs or segment.")
         return partial_flow
     
     def validate_global_cap(self, G=None, global_cap=None, I_a = None, demand = None, err = 0.00000001):
@@ -583,6 +809,80 @@ class FOCS:
 
         return self.f
     
+    def solve_segmented_focs(self, err = 0.0000001, MPCstopper = False, MPCcondition = 0):
+        while not self.terminate:
+            #begin round
+            #initiate capacities
+            if self.it == 0:
+                G_rk = copy.deepcopy(self.G_r)
+            G_rk = self.update_network_capacities_g(G_rk, self.flow_val)
+
+            #determine max flow
+            self.flow_val, flow_dict = nx.maximum_flow(G_rk, "s", "t", flow_func=self.flow_func)
+            self.maxDiff = sum([G_rk["s"]["j{}".format(j)]["capacity"] for j in self.instance.jobs]) - self.flow_val
+            if self.total_demand_r - self.flow_val < err:
+                #end round
+
+                #Check for subcrit. For some instances, there are still active intervals that only now don't reach the max anymore #FIXME (for now)
+                subCrit_mask = [G_rk["i{}".format(i)]["t"]["capacity"]-flow_dict["i{}".format(i)]["t"] > err for i in self.I_a]
+                subCrit = [self.I_a[i] for i in range(0,len(self.I_a)) if subCrit_mask[i]]
+                
+                #Update I_p
+                self.I_p += subCrit
+                #Update I_crit
+                self.I_crit = self.I_crit + [sorted([self.I_a[i] for i in range(0,len(self.I_a)) if not subCrit_mask[i]])]
+
+                #check terminate
+                if len(self.I_p) == 0:
+                    self.terminate = True
+                    #Add critical flow to current flow
+                    self.f = self.flowOp.add_flows(self.f, flow_dict, G_rk)
+                else:
+                    #determine critical flow
+                    I_crit_r = self.I_crit[-1] 
+                    flow_dict_crit = self.flowOp.partial_flow(flow_dict, I_crit_r, self.I_a, self.instance.jobs, self.instance.J, structure="segment", parent_J=self.instance.parent_instance.J, parent_jobs=self.instance.parent_jobs) 
+                    
+                    #Add critical flow to current flow
+                    self.f = self.flowOp.add_flows(self.f,flow_dict_crit,G_rk)
+
+                    #Reduce flow network by critical flow
+                    self.G_r = self.flowOp.reduce_network(self.G_r,flow_dict_crit,I_crit_r)
+
+                    #Update active and parked sets
+                    self.I_a = sorted(self.I_p)
+                    self.I_p = []
+
+                    if MPCstopper:
+                        self.MPCcondition = MPCcondition
+                        if MPCcondition < min(self.I_a):
+                            # print('[MESSAGE]: Solution optimal for first {} timesteps only.'.format(MPCcondition + 1))
+                            return self.f
+
+                    #amount of work yet to be scheduled
+                    self.total_demand_r = sum([self.G_r["s"]["j{}".format(j)]["capacity"] for j in self.instance.jobs])
+
+                    self.rd += 1
+                    self.it = 0
+            else:
+                #initiate next iteration
+                #Determine subcritical sets
+                subCrit_mask = [G_rk["i{}".format(i)]["t"]["capacity"] - flow_dict["i{}".format(i)]["t"] > err for i in self.I_a]
+                subCrit = [self.I_a[i] for i in range(0,len(self.I_a)) if subCrit_mask[i]]
+
+                #Reduce network G_rk
+                flow_dict_sub = self.flowOp.partial_flow(flow_dict, subCrit, self.I_a, self.instance.jobs, self.instance.J, structure = "segment", parent_J=self.instance.parent_instance.J, parent_jobs = self.instance.parent_jobs)
+                G_rk = self.flowOp.reduce_network(G_rk,flow_dict_sub,subCrit)
+                self.total_demand_r = sum([G_rk["s"]["j{}".format(j)]["capacity"] for j in self.instance.jobs])
+                
+                #Update I_p
+                self.I_p += subCrit
+
+                #Update I_a
+                self.I_a = sorted([self.I_a[i] for i in range(0,len(self.I_a)) if not subCrit_mask[i]])
+                self.it += 1
+
+        return self.f
+
     def objective(self):
         #normalized objective for validation
         #instead of the sum of squares, we first weight the square of the power (e/len_i[i]) by len_i[i]/timeStep      
@@ -668,4 +968,262 @@ class FOCS:
         print("[MESSAGE]: Conclude validation of solution")
         return
     
+class Schedule:
+    def __init__(self, focs):
+        self.instance = focs.instance
+        self.flowNet = focs.flowNet
+        self.flowOp = focs.flowOp
+        self.focs = focs
+    
+    def solve_schedule(self, how = 'linear'):
+        #make min cost flow network
+        self.G_sched = self.flowNet.focs_solution_to_network(self.instance, self.focs.f, how=how)
+        #solve min cost flow
+        self.f_sched = nx.min_cost_flow(self.G_sched)
+        return self.f_sched
+    
+    def flow_to_dataframe(self, f = None):
+        if f is None:
+            f = self.f_sched
+        # flow to dataframe - format schedule
+        s = [self.focs.instance.I_a] + [self.focs.instance.intervals_start] + [[f['i'+str(i)]['t'] for i in self.focs.instance.I_a]] + [[0]*len(self.focs.instance.I_a) for j in self.focs.instance.jobs]
+        for jid, j in enumerate(self.focs.instance.jobs):
+            for i in self.focs.instance.J_inverse['j'+str(j)]:
+                s[3+jid][i] = f['j'+str(j)]['i'+str(i)] / self.focs.instance.tau
+        s = pd.DataFrame(s).T
+        s.columns = ['time'] + ['breakpoints'] + ['agg'] + ['j'+str(j) for j in self.focs.instance.jobs]
+        return s
 
+    def derive_early_departure_schedule(self, key='t1_900', f=None):
+        if f is None:
+            f = self.f_sched
+        # determine G and empty flow
+        self.focs.flowNet.focs_instance_to_network(self.focs.instance)
+        flowOp = FlowOperations(self.focs.flowNet.G, self.focs.instance)
+        self.jobs_dep_real = [self.focs.instance.data[key].iloc[j] for j in self.focs.instance.jobs] 
+        self.f_ed = flowOp.empty_flow()
+        # fill empty flow
+        for j in self.focs.instance.jobs:
+            if self.jobs_dep_real[j] in self.focs.instance.breakpoints:
+                temp_idx = self.focs.instance.breakpoints.index(self.jobs_dep_real[j])
+            else:
+                temp_idx = max(self.focs.instance.breakpoints)
+            for i in range(min(self.focs.instance.J_inverse['j'+str(j)]), min(self.focs.instance.breakpoints.index(self.focs.instance.jobs_departure[j]), temp_idx)):
+                self.f_ed['j'+str(j)]['i'+str(i)] = f['j'+str(j)]['i'+str(i)]
+            self.f_ed['s']['j'+str(j)] = sum(self.f_ed['j'+str(j)].values())
+        for i in self.focs.instance.I_a:
+            self.f_ed['i'+str(i)]['t'] = sum([self.f_ed['j'+str(j)]['i'+str(i)] for j in self.focs.instance.J['i'+str(i)]])
+        return self.f_ed
+    
+    def objective(self, f_plan = None, f_ed = None):
+        if f_plan is None:
+            f_plan = self.f_sched
+        if f_ed is None:
+            f_ed = self.derive_early_departure_schedule(f = f_plan)
+
+        ## Metrics per job
+
+        # ENS exact
+        self.jobs_ens_abs_exact = [self.focs.f['s']['j'+str(j)] - f_ed['s']['j'+str(j)] for j in self.focs.instance.jobs]
+        self.jobs_ens_rel_exact = [self.jobs_ens_abs_exact[j]/self.focs.flowNet.G['s']['j'+str(j)]['capacity'] for j in self.focs.instance.jobs]
+        # ENS rounded
+        self.jobs_ens_abs = [round(self.focs.f['s']['j'+str(j)] - f_ed['s']['j'+str(j)],6) for j in self.focs.instance.jobs]
+        self.jobs_ens_rel = [round(self.jobs_ens_abs_exact[j]/self.focs.flowNet.G['s']['j'+str(j)]['capacity'],6) for j in self.focs.instance.jobs]
+        
+        # QOS1 : relative energy served
+        self.jobs_es_rel = [1 - self.jobs_ens_rel[j] for j in self.focs.instance.jobs]
+
+        # QOS2 : relative wait till charging starts
+        self.jobs_qos2_waiting_real, self.jobs_qos2_waiting_plan = self.qos_2(f_plan=f_plan)
+
+        # QOS3 : FIXME variation of charging power over time
+        self.jobs_qos3_powervar_real, self.jobs_qos3_powervar_plan = self.qos_3(f_plan = f_plan, f_ed = f_ed)
+
+        # QOE : 
+        self.jobs_qoe_real_ed, self.jobs_qoe_real_pot, self.jobs_qoe_plan_ed, self.jobs_qoe_plan_pot = self.qoe(f_plan=f_plan,f_ed=f_ed)
+
+        ## Global metrics
+
+        # #QOE total
+        self.qoe_real_ed_total_exact = sum(self.jobs_qoe_real_ed)
+        self.qoe_real_pot_total_exact = sum(self.jobs_qoe_real_pot)
+        self.qoe_plan_ed_total_exact = sum(self.jobs_qoe_plan_ed)        
+        self.qoe_plan_pot_total_exact = sum(self.jobs_qoe_plan_pot)        
+        self.qoe_real_ed_total_rel = self.qoe_real_ed_total_exact/self.focs.instance.n
+        self.qoe_real_pot_total_rel = self.qoe_real_pot_total_exact/self.focs.instance.n
+        self.qoe_plan_ed_total_rel = self.qoe_plan_ed_total_exact/self.focs.instance.n
+        self.qoe_plan_pot_total_rel = self.qoe_plan_pot_total_exact/self.focs.instance.n
+
+        # ENS max
+        self.jobs_ens_abs_max = max(self.jobs_ens_abs)
+        self.jobs_ens_rel_max = max(self.jobs_ens_rel)
+
+        # Jain's fairness index based on relative ENS
+        self.jain_ens_rel = self.Jain(self.jobs_ens_rel)
+        self.jain_ens_rel_exact = self.Jain(self.jobs_ens_rel_exact)
+
+        # Hoßfeld's fairness index based on relative ENS
+        self.hossfeld_ens_rel = self.Hossfeld(self.jobs_ens_rel)
+        self.hossfeld_ens_rel_exact = self.Hossfeld(self.jobs_ens_rel_exact)
+
+        # cycle switches TODO
+
+        # energy served
+        self.es_exact = sum(self.focs.instance.jobs_demand) - sum(self.jobs_ens_abs_exact)
+        self.es = round(sum(self.focs.instance.jobs_demand) - sum(self.jobs_ens_abs),6)
+        # energy not served
+        self.ens_abs_exact = sum(self.jobs_ens_abs_exact)
+        self.ens_abs = sum(self.jobs_ens_abs)
+        self.ens_rel_exact_avg = sum(self.jobs_ens_rel_exact)/len(self.jobs_ens_rel_exact)
+        self.ens_rel_avg = sum(self.jobs_ens_rel)/len(self.jobs_ens_rel)
+
+        return
+    
+    def Jain(self, x):
+        return sum(x)**2/(len(x) * sum([x_i**2 for x_i in x]))
+    
+    def Hossfeld(self, x, H = 1, h = 0):
+        return 1 - 2* statistics.pstdev(x)/(H-h)
+    
+    def qos_2(self, f_plan = None): # qos_2 in Danner and de Meer (2021)
+        if f_plan is None:
+            f_plan = self.f_sched
+
+        # determine first interval with positive charge
+        first_pos_charging_power = [list(f_plan['j'+str(j)].values()).index([i for i in list(f_plan['j'+str(j)].values()) if i != 0][0]) for j in self.focs.instance.jobs]
+        idx_start_charging = [self.focs.instance.J_inverse['j'+str(j)][first_pos_charging_power[self.focs.instance.jobs.index(j)]] for j in self.focs.instance.jobs]
+        t_start_charging = [self.focs.instance.breakpoints[idx_start_charging[self.focs.instance.jobs.index(j)]] for j in self.focs.instance.jobs]
+
+        # determine 
+        self.jobs_qos2_waiting_plan = [max(0,1 - (t_start_charging[j] - self.focs.instance.jobs_arrival[j])/(self.focs.instance.jobs_departure[j] - self.focs.instance.jobs_arrival[j])) for j in self.focs.instance.jobs]
+
+        # determine 
+        self.jobs_qos2_waiting_real = [max(0,1 - (t_start_charging[j] - self.focs.instance.jobs_arrival[j])/(self.jobs_dep_real[j] - self.focs.instance.jobs_arrival[j])) for j in self.focs.instance.jobs]
+
+        return self.jobs_qos2_waiting_real, self.jobs_qos2_waiting_plan
+    
+    def qos_3(self,f_plan = None, f_ed = None):
+    # NOTE Checking correctness of the statements by Danner and de Meer with Maria rn.
+    # NOTE Checked. They use the biased sample standard deviation (divide by N). See https://onlinelibrary.wiley.com/doi/abs/10.1111/j.1467-9639.1980.tb00398.x for proof of bound.
+        if f_plan is None:
+            f_plan = self.f_sched 
+        if f_ed is None:
+            f_ed = self.f_ed
+
+        # create lists to store results. Index = job index.
+        jobs_qos3_powervar_real = []
+        jobs_qos3_powervar_plan = []
+
+        # make schedule
+        s = self.flow_to_dataframe(f_plan)
+        s_ed = self.flow_to_dataframe(f_ed)
+
+        for j in self.focs.instance.jobs:
+            # isolate list of powers
+            s_j = list(s['j'+str(j)])
+            s_ed_j = list(s_ed['j'+str(j)])
+
+            for case in [[s_j, jobs_qos3_powervar_plan, 'plan'], [s_ed_j, jobs_qos3_powervar_real, 'real']]:
+
+                # retrieve first and last non-zero index
+                temp = [i for i,e in enumerate(case[0]) if e!=0]
+
+                # raise exception if no charging at all (statistics error std with empty sample)
+                if len(temp) == 0:
+                    print('[WARNING]: EV j = {} does not charge in {} case. QoS_3 set to 1.'.format(j, case[2]))
+                    case[1] += [1]
+                    continue
+
+                t_start = min(temp)
+                t_end = max(temp)+1
+
+                # qos for j add to list
+                case [1] += [1 - (2*statistics.pstdev(case[0][t_start:t_end])/self.focs.instance.jobs_cap[j]) ]
+
+        return jobs_qos3_powervar_real, jobs_qos3_powervar_plan
+    
+    def supplied_by_milestone_ed(self,f,j,milestone_t):
+            # determine 
+            # FIXME this assumes periodicity
+            if not self.focs.instance.periodicity:
+                print('[WARNING]: Function supplied_by_milestone_ed() assumed periodicity == True. Here it is False.')
+            # FIXME this assumes milestones in timestep units
+            
+            supplied = sum([f['j'+str(j)]['i'+str(i)] for i in self.focs.instance.J_inverse['j'+str(j)] if i < min(milestone_t, self.jobs_dep_real[j])])
+
+            if milestone_t < min(self.focs.instance.J_inverse['j'+str(j)])+1:
+                print('[WARNING]: milestone deadline before arrival of the EV.') 
+            # early departure case: EV leaves before milestone becomes applicable. 
+            elif milestone_t > min(self.jobs_dep_real[j], max(self.focs.instance.J_inverse['j'+str(j)])+1):
+                supplied_pot = supplied + (milestone_t - min(self.jobs_dep_real[j], max(self.focs.instance.J_inverse['j'+str(j)])+1))*self.focs.instance.jobs_cap[j]*self.focs.instance.tau # if had charged at full power after time of departure, would have made milestone?
+            else: 
+                supplied_pot = supplied
+
+            return supplied, supplied_pot #supplied is what has been supplied. supplied_pot is what could have been supplied if driver had stayed until milestone. 
+
+    def qoe_j_ed(self,f,j,milestones_j, condition = 'supplied', err=0.0000001):
+        for milestone in milestones_j:
+                supplied, supplied_pot = self.supplied_by_milestone_ed(f,j,milestone[1])
+                # check if made milestone or fully charged for this milestone. 
+                if condition == 'supplied':
+                    if supplied < min(milestone[0],self.focs.instance.jobs_demand[j])-err:
+                        return 0
+                elif condition == 'supplied_pot':
+                    if supplied_pot < min(milestone[0],self.focs.instance.jobs_demand[j])-err:
+                        return 0
+                else:
+                    print('[WARNING]: Condition value has to be supplied or supplied_pot. Other values not known.')
+        return 1
+    
+    def supplied_by_milestone_plan(self,f,j,milestone_t):
+            # determine 
+            # FIXME this assumes periodicity
+            if not self.focs.instance.periodicity:
+                print('[WARNING]: Function supplied_by_milestone_plan() assumed periodicity == True. Here it is False.')
+            # FIXME this assumes milestones in timestep units
+            
+            supplied = sum([f['j'+str(j)]['i'+str(i)] for i in self.focs.instance.J_inverse['j'+str(j)] if i < milestone_t])
+
+            if milestone_t < min(self.focs.instance.J_inverse['j'+str(j)])+1:
+                print('[WARNING]: milestone deadline before arrival of the EV.') 
+            # early departure case: EV leaves before milestone becomes applicable. 
+            elif milestone_t > max(self.focs.instance.J_inverse['j'+str(j)])+1:
+                supplied_pot = supplied + (milestone_t - (max(self.focs.instance.J_inverse['j'+str(j)])+1))*self.focs.instance.jobs_cap[j]*self.focs.instance.tau # if had charged at full power after time of (planned/expected) departure, would have made milestone?
+            else: 
+                supplied_pot = supplied
+
+            return supplied, supplied_pot #supplied is what has been supplied. supplied_pot is what could have been supplied if driver had stayed until milestone. 
+
+    def qoe_j_plan(self,f,j,milestones_j, condition = 'supplied', err=0.0000001):
+        for milestone in milestones_j:
+                supplied, supplied_pot = self.supplied_by_milestone_plan(f,j,milestone[1])
+                # check if made milestone or fully charged for this milestone. 
+                if condition == 'supplied':
+                    if supplied < min(milestone[0],self.focs.instance.jobs_demand[j])-err:
+                        return 0
+                elif condition == 'supplied_pot':
+                    if supplied_pot < min(milestone[0],self.focs.instance.jobs_demand[j])-err:
+                        return 0
+                else:
+                    print('[WARNING]: Condition value has to be supplied or supplied_pot. Other values not known.')
+        return 1
+
+    def qoe(self, f_plan = None, f_ed = None, err = 0.0000001): # check milestones and guarantees.
+        # Binary metric per EV. 1 if requirements met. 0 if not.
+        if f_plan is None:
+            f_plan = self.f_sched
+        if f_ed is None:
+            f_ed = self.f_ed
+        # if button is off, make guarantee static asr
+        if not self.focs.instance.milestones_active:
+            # add asr milestones: 23kWh by 4pm (if quarters then by quarter 64)
+            milestones = [[[23,64]] for j in self.focs.instance.jobs] # if multiple guarantees, energy is additive!
+        else:
+            milestones = self.focs.instance.milestones
+
+        jobs_qoe_real_ed = [self.qoe_j_ed(f_ed, j, milestones[j],condition='supplied') for j in self.focs.instance.jobs]
+        jobs_qoe_real_pot = [self.qoe_j_ed(f_ed, j, milestones[j],condition='supplied_pot')for j in self.focs.instance.jobs]
+        jobs_qoe_plan_ed = [self.qoe_j_plan(f_plan, j, milestones[j],condition='supplied') for j in self.focs.instance.jobs]
+        jobs_qoe_plan_pot = [self.qoe_j_plan(f_plan, j, milestones[j],condition='supplied_pot')for j in self.focs.instance.jobs]
+
+        return jobs_qoe_real_ed, jobs_qoe_real_pot, jobs_qoe_plan_ed, jobs_qoe_plan_pot
