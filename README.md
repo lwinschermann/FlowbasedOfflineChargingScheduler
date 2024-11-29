@@ -135,7 +135,7 @@ timeSteps = [900]<br>
 maxFlows = [shortest_augmenting_path]
 
 The used data stems from an electric bus charging hub. Therefore, an additional data processing file is included in carbon_steering_experiments/busses.py. The goal of the experiments was to validate a transform applied to incorporate carbon steering (similarly price steering) objectives in weighted combination with the original flattening objective into FOCS. Furthermore, the tradeoff between flatness and carbon intensity or the resulting schedule may be investigated based on the weights attached to either objective. <br>
-The main file can be found under 'carbon_steering_experiments/'
+The main file can be found under 'carbon_steering_experiments/co2_bus_experiments'
 
 For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t utwente d o t nl) or Leander van der Bijl (L d o t C d o t vanderBijl a t utwente d o t nl)
 
@@ -161,11 +161,42 @@ For the first part, we additionally generate a power profile for the uncontrolle
 
 For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t utwente d o t nl)
 
+### Carbon steering experiments v2 - office parking lot
+Experimental setup October 2024 <br>
+Run with Python 3.11.7 <br>
+Initial commit e32d371 <br>
+We conducted experiments with the following parameters:
+
+timeSteps = [900]<br>
+maxFlows = [shortest_augmenting_path]
+
+The experimental setup is similar to the original carbon steering experiments, but this time for our main data set, the office parking lot. The goal of the experiments was to validate a transform applied to incorporate carbon steering (similarly price steering) objectives in weighted combination with the original flattening objective into FOCS. Furthermore, the tradeoff between flatness and carbon intensity or the resulting schedule may be investigated based on the weights attached to either objective. The experiments nicely illustrated rebound peaks when naively applying price steering - instead of mitigating congestion, it intensified at another point in time. <br>
+The main file can be found under 'carbon_steering_experiments/co2_office_experiments'
+
+For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t utwente d o t nl)
+
+### LYNCS experiments
+Experimental setup November 2024 <br>
+Run with Python 3.11.7 <br>
+Initial commit e32d371 <br>
+We conducted experiments with the following parameters:
+
+timeSteps = [900]<br>
+maxFlows = [shortest_augmenting_path]
+
+The power profile computed by FOCS is both unique and optimal (from an aggregated point of view). However, there may exist multiple schedules that achieve that optimum. We developed the Leverage Your Non-unique Choice of Schedule (LYNCS) method [4], a way to choose a schedule from the set of optimal solutions with the goal to improve robustness to EVs departing earlier than expected, and increase fairness in terms of quality of service/experience among EVs. LYNCS has two main tasks: a) define virtual cost functions to make it virtually expensive to delay charging for any individual EV. The further back in time we schedule any unit of energy being charged to an EV, the more virtually expensive it gets. b) to solve a minimum cost flow and thereby find a schedule that minimizes the virtual cost of the schedule (do not unnecessarily delay any charging).
+<br>
+We tested the method numerically. In the experimental setup, we restrict ourselves to 79 EVs, exactly those that visited the parking lot at least 50 times during the considered period. We then simulate 30 days, each with one charging session per considered EV. In the simulations, we solve FOCS with instead of the actual departure time the average historical departure time. We then derive an early departure schedule based on the real departure time, where any charging scheduled after the real departure results in energy not served. The code evaluates the schedule based on a large number of quality of service and experience metrics, as well as two fairness indices.  <br>
+The main file can be found under 'lyncs_experiments/'
+
+For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t utwente d o t nl)
+
 ## References
 
 [1] Leoni Winschermann, Marco E.T. Gerards, Antonios Antoniadis, Gerwin Hoogsteen, Johann Hurink. 2023. Relating Electric Vehicle Charging to Speed Scaling with Job-Specific Speed Limits. https://arxiv.org/abs/2309.06174. [currently under peer review] <br>
 [2] Aric A. Hagberg, Daniel A. Schult, and Pieter J. Swart. 2008. Exploring Network Structure, Dynamics, and Function using NetworkX. In Proceedings of the 7th Python in Science Conference, Gaël Varoquaux, Travis Vaught, and Jarrod Millman (Eds.). Pasadena, CA USA, 11 – 15. <br>
 [3] Gurobi Optimization, LLC. 2023. Gurobi Optimizer Reference Manual. https://www.gurobi.com <br>
+[4] Leoni Winschermann, Gerwin Hoogsteen, Johann Hurink. 2024. Making Tough Choices: Picking Robust Electric Vehicle Schedules among Optimal Solutions. [currently under peer review; contact for more information about LYNCS] <br>
 
 # Related papers
 
@@ -173,3 +204,4 @@ Leoni Winschermann, Marco E.T. Gerards, Antonios Antoniadis, Gerwin Hoogsteen, J
 Leoni Winschermann, Marco E.T. Gerards, Johann Hurink. 2024. Improving the Optimization in Model Predictive Controllers: Scheduling Large Groups of Electric Vehicles. https://arxiv.org/abs/2403.16622. [currently under peer review] <br>
 Leoni Winschermann, Leander van der Bijl, Marco E.T. Gerards, Johann Hurink. 2024. [title omitted as review is double blind] [currently under peer review] <br>
 Leoni Winschermann, Mario Günzel, Kuan-Hsun Chen, Johann Hurink. 2024. [title omitted as review is double blind] [currently under peer review] <br>
+Leoni Winschermann, Gerwin Hoogsteen, Johann Hurink. 2024. Making Tough Choices: Picking Robust Electric Vehicle Schedules among Optimal Solutions. [currently under peer review]
