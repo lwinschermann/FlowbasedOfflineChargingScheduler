@@ -123,7 +123,76 @@ class Bookkeeping():
         self.ovFOCSred = []
         self.ovFOCSmpcred = []
         self.ovRatiored = []
+
+        '''for schedule experiments to record qos and qoe measures'''
+        # job specific measures
+        self.schedHeadersJobs = ['idx', 'weighting_method', 'day', 'count so far', 'ens_abs_exact', 'ens_rel_exact', 'ens_abs', 'ens_rel', 'qos1', 'qos2_real', 'qos2_plan', 'qos3_real', 'qos3_plan', 'qoe_real', 'qoe_real_pot', 'qoe_plan', 'qoe_plan_pot']
+        # global measures
+        self.schedHeadersGlobal = ['weighting_method', 'day', 'qoe_real_total_exact', 'qoe_real_pot_total_exact', 'qoe_plan_total_exact', 'qoe_plan_pot_total_exact', 'qoe_real_total_rel', 'qoe_real_pot_total_rel', 'qoe_plan_total_rel', 'qoe_plan_pot_total_rel', 'ens_abs_max', 'ens_rel_max', 'jain_ens_rel', 'jain_ens_rel_exact', 'hossfeld_ens_rel', 'hossfeld_ens_rel_exact', 'es_exact', 'es', 'ens_abs_exact', 'ens_abs', 'ens_rel_exact_avg', 'ens_rel_avg', 'qos_1_min', 'qos_2_plan_min', 'qos_2_real_min', 'qos_3_plan_min', 'qos_3_real_min', 'jain_qos_1', 'jain_qos_2_plan', 'jain_qos_2_real', 'jain_qos_3_plan', 'jain_qos_3_real', 'hossfeld_qos_1', 'hossfeld_qos_2_plan', 'hossfeld_qos_2_real', 'hossfeld_qos_3_plan', 'hossfeld_qos_3_real']
+        
+        self.schedJobs = []
+        self.schedGlobal = []
+
+    def write_objectives_schedule(self, schedule, weighting_method, day, idx, n_idx):
+        self.schedJobs += [[idx, [weighting_method for i in idx], [day for i in idx], n_idx, schedule.jobs_ens_abs_exact, schedule.jobs_ens_rel_exact, schedule.jobs_ens_abs, schedule.jobs_ens_rel, schedule.jobs_es_rel, schedule.jobs_qos2_waiting_real, schedule.jobs_qos2_waiting_plan, schedule.jobs_qos3_powervar_real, schedule.jobs_qos3_powervar_plan, schedule.jobs_qoe_real_ed, schedule.jobs_qoe_real_pot, schedule.jobs_qoe_plan_ed, schedule.jobs_qoe_plan_pot]]
+        self.schedGlobal += [[weighting_method, day, schedule.qoe_real_ed_total_exact, schedule.qoe_real_pot_total_exact, schedule.qoe_plan_ed_total_exact, schedule.qoe_plan_pot_total_exact, schedule.qoe_real_ed_total_rel, schedule.qoe_real_pot_total_rel, schedule.qoe_plan_ed_total_rel, schedule.qoe_plan_pot_total_rel, schedule.jobs_ens_abs_max, schedule.jobs_ens_rel_max, schedule.jain_ens_rel, schedule.jain_ens_rel_exact, schedule.hossfeld_ens_rel, schedule.hossfeld_ens_rel_exact, schedule.es_exact, schedule.es, schedule.ens_abs_exact, schedule.ens_abs, schedule.ens_rel_exact_avg, schedule.ens_rel_avg, schedule.qos_1_min, schedule.qos_2_plan_min, schedule.qos_2_real_min, schedule.qos_3_plan_min, schedule.qos_3_real_min, schedule.jain_qos_1, schedule.jain_qos_2_plan, schedule.jain_qos_2_real, schedule.jain_qos_3_plan, schedule.jain_qos_3_real, schedule.hossfeld_qos_1, schedule.hossfeld_qos_2_plan, schedule.hossfeld_qos_2_real, schedule.hossfeld_qos_3_plan, schedule.hossfeld_qos_3_real]]
+        return
     
+    def write_objectives_schedule_to_csv(self, data, weighting_methods, days, jobs, suffix = ''):
+        # make dataframe of schedglobal and schedjobs
+        dfSchedJobs = pd.concat([pd.DataFrame(np.array(x_list).T.tolist(), columns = self.schedHeadersJobs) for x_list in self.schedJobs])
+        dfSchedJobs.reset_index(inplace=True)
+        
+        dfSchedGlobal = pd.DataFrame(self.schedGlobal, columns=self.schedHeadersGlobal)
+
+        # bk save global results
+        dfSchedGlobal.to_csv("data/output/schedules/qosqoe/schedule_global_objectives.csv", sep=';')
+
+        # bk concat bk.schedJobs to instanceData
+        # create idx column in instanceData
+        data['idx'] = data.index.astype(str)
+        # merge bk.schedJobs into instanceData for each weighting method
+        header = data.columns.values.tolist()
+        scheds = ['s','s_lin','s_q','s_linp','s_qp','s_prob','s_probfull']
+        for sched in scheds:
+            temp_j = copy.deepcopy(dfSchedJobs[dfSchedJobs['weighting_method']==sched])
+            temp_j = temp_j.set_index('idx')
+            data = data.merge(temp_j, on = 'idx', how = 'left', suffixes = ['' ,'_'+sched])
+            data = data.drop(['index', 'weighting_method'], axis=1)
+            header += [x+'_'+sched for x in ['day','count so far_y','ens_abs_exact','ens_rel_exact','ens_abs','ens_rel','qos1','qos2_real','qos2_plan','qos3_real','qos3_plan','qoe_real','qoe_real_pot','qoe_plan','qoe_plan_pot']]
+        # rename column headers
+        data.columns = header
+
+        # drop day entries
+        data = data.drop(['day_'+x for x in scheds[1:]], axis=1)
+        data = data.rename({'day_s':'day'}, axis=1)
+        data_filtered = data.dropna(axis=0, subset = 'day')
+        # bk save instanceData
+        data.to_csv("data/output/schedules/qosqoe/instanceData_j_obj.csv", sep=';')
+        data_filtered.to_csv("data/output/schedules/qosqoe/instanceData_j_obj_filtered.csv", sep=';')
+        
+        # # bk save results per car
+        #FIXME maybe drop data that has not been used in sim?
+        ids = data_filtered['card_id'].unique()
+        for idx, id in enumerate(ids):
+            # filter instanceData for job
+            temp = copy.deepcopy(data_filtered[data_filtered['card_id']==id])
+            # save to csv the last x entries and count so far
+            temp[temp.columns[-14*8+12:]].to_csv("data/output/schedules/qosqoe/perEV/instanceData_EV{}_obj.csv".format(idx), sep=';')
+
+        # bk save results per schedule per day
+        for sched in weighting_methods:
+            temp_s = dfSchedJobs[dfSchedJobs['weighting_method']==sched]
+            temp_s.to_csv("data/output/schedules/qosqoe/qosqoe_{}{}.csv".format(sched,suffix), sep = ';')
+            dfSchedGlobal[dfSchedGlobal['weighting_method']==sched].to_csv("data/output/schedules/qosqoe/schedule_global_objectives_{}{}.csv".format(sched,suffix), sep = ';')
+            for day in days:
+                # filter results for sched and day
+                temp = temp_s[temp_s['day']==str(day)]
+                # save csv with proper prefix
+                temp.to_csv("data/output/schedules/qosqoe/qosqoe_{}_{}{}.csv".format(sched, day,suffix), sep=';')
+
+        return
+
     def empty_temp(self):
         # model building runtimes. Will be a list of lists
         self.mbLPtemp = []
@@ -472,3 +541,24 @@ class Bookkeeping():
                 #content
                 writer.writerows(np.array([self.mbLPred_median[-n:], self.mbFOCSred_median[-n:], self.mbFOCSmpcred_median[-n:], self.solLPred_median[-n:], self.solFOCSred_median[-n:], self.solFOCSmpcred_median[-n:], self.rtLPred_median[-n:], self.rtFOCSred_median[-n:], self.rtFOCSmpcred_median[-n:]]).T.tolist())
         return
+
+    def write_schedule_objectives(self, schedule, prefix = ''):
+        path = 'C:/Users/WinschermannL/OneDrive - University of Twente/Documenten/Gridshield/Criticalintervals/FOCS_code/data/output/schedules/qosqoe'
+
+        # metrics per job
+        with open(path + 'qosqoe_j_{}.csv'.format(prefix), 'w', newline='' ) as f:
+            writer = csv.writer(f,delimiter=';')
+            #header
+            writer.writerow(['jobs_ens_abs_exact', 'jobs_ens_rel_exact'])
+            #content
+            writer.writerows(np.array([schedule.self.jobs_ens_abs_exact,schedule.self.jobs_ens_rel_exact]))
+
+        # metrics global
+        with open(path + 'qosqoe_{}.csv'.format(prefix), 'w', newline='' ) as f:
+            writer = csv.writer(f,delimiter=';')
+            #header
+            writer.writerow(['ens_abs_exact', 'ens_rel_exact'])
+            #content
+            writer.writerows(np.array([schedule.self.ens_abs_exact,schedule.self.ens_rel_exact]))
+        return
+    

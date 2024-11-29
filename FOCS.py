@@ -57,10 +57,7 @@ class FOCSinstance:
         self.jobs_arrival = [instanceData["t0_" + str(timeStep)+str(prob_t0)].iloc[j] for j in self.jobs]
 
         #initialize intervals
-        #self.breakpoints = sorted(instanceData["t0_"+str(timeStep)].append(instanceData["t1_" + str(timeStep)]).drop_duplicates().tolist())
-        #self.breakpoints = sorted(instanceData["t0_"+str(timeStep)]._append(instanceData["t1_" + str(timeStep)]).drop_duplicates().tolist())
-        # self.breakpoints = sorted(pd.concat([instanceData["t0_"+str(timeStep)], instanceData["t1_" + str(timeStep)]]).drop_duplicates().tolist())
-        self.breakpoints = sorted(instanceData["t0_"+str(timeStep)+str(prob_t0)]._append(instanceData["t1_" + str(timeStep)+str(prob_t1)]).drop_duplicates().tolist())
+        self.breakpoints = sorted(instanceData["t0_"+str(timeStep)].append(instanceData["t1_" + str(timeStep)]).drop_duplicates().tolist())
         if self.periodicity:
             self.augment_breakpoints()
             if self.cumprob:
@@ -275,7 +272,7 @@ class FOCSinstance:
         self.J_inverse = {}
         if not startCon:
             for j in self.jobs:
-                self.J_inverse["j"+str(j)] = [i for i in range(self.intervals_start.index(self.data["t0_"+str(self.timeStep)+self.prob_t0].iloc[j]), self.intervals_end.index(self.data["t1_"+str(self.timeStep)+self.prob_t1].iloc[j])+1)] 
+                self.J_inverse["j"+str(j)] = [i for i in range(self.intervals_start.index(self.data["t0_"+str(self.timeStep)].iloc[j]), self.intervals_end.index(self.data["t1_"+str(self.timeStep)].iloc[j])+1)] 
         else:
             for j in self.jobs:
                 try:
@@ -968,7 +965,7 @@ class FOCS:
         print("[MESSAGE]: Conclude validation of solution")
         return
     
-class Schedule:
+class Schedule: #class introduced to a) extract specific schedules from optimal solutions b) choose a schedule with LYNCS c) evaluate schedules
     def __init__(self, focs):
         self.instance = focs.instance
         self.flowNet = focs.flowNet
@@ -1058,13 +1055,36 @@ class Schedule:
         self.jobs_ens_abs_max = max(self.jobs_ens_abs)
         self.jobs_ens_rel_max = max(self.jobs_ens_rel)
 
+        # QOS1 min
+        self.qos_1_min = min(self.jobs_es_rel)
+        # QOS2 min
+        self.qos_2_plan_min = min(self.jobs_qos2_waiting_plan)
+        self.qos_2_real_min = min(self.jobs_qos2_waiting_real)
+        # QOS3 min
+        self.qos_3_plan_min = min(self.jobs_qos3_powervar_plan)
+        self.qos_3_real_min = min(self.jobs_qos3_powervar_real)
+
         # Jain's fairness index based on relative ENS
         self.jain_ens_rel = self.Jain(self.jobs_ens_rel)
         self.jain_ens_rel_exact = self.Jain(self.jobs_ens_rel_exact)
 
+        # Jain's fairness index based on qos and qoe
+        self.jain_qos_1 = self.Jain(self.jobs_es_rel)
+        self.jain_qos_2_plan = self.Jain(self.jobs_qos2_waiting_plan)
+        self.jain_qos_2_real = self.Jain(self.jobs_qos2_waiting_real)
+        self.jain_qos_3_plan = self.Jain(self.jobs_qos3_powervar_plan)
+        self.jain_qos_3_real = self.Jain(self.jobs_qos3_powervar_real)
+
         # Hoßfeld's fairness index based on relative ENS
         self.hossfeld_ens_rel = self.Hossfeld(self.jobs_ens_rel)
         self.hossfeld_ens_rel_exact = self.Hossfeld(self.jobs_ens_rel_exact)
+
+        # Hoßfeld's fairness index based on qos and qoe
+        self.hossfeld_qos_1 = self.Hossfeld(self.jobs_es_rel)
+        self.hossfeld_qos_2_plan = self.Hossfeld(self.jobs_qos2_waiting_plan)
+        self.hossfeld_qos_2_real = self.Hossfeld(self.jobs_qos2_waiting_real)
+        self.hossfeld_qos_3_plan = self.Hossfeld(self.jobs_qos3_powervar_plan)
+        self.hossfeld_qos_3_real = self.Hossfeld(self.jobs_qos3_powervar_real)
 
         # cycle switches TODO
 
