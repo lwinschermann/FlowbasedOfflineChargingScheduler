@@ -203,5 +203,5 @@ For questions, feel free to contact Leoni Winschermann (L d o t Winschermann a t
 Leoni Winschermann, Marco E.T. Gerards, Antonios Antoniadis, Gerwin Hoogsteen, Johann Hurink. 2023. Relating Electric Vehicle Charging to Speed Scaling with Job-Specific Speed Limits. https://arxiv.org/abs/2309.06174. [currently under peer review] <br>
 Leoni Winschermann, Marco E.T. Gerards, Johann Hurink. 2024. Improving the Optimization in Model Predictive Controllers: Scheduling Large Groups of Electric Vehicles. https://arxiv.org/abs/2403.16622. [currently under peer review] <br>
 Leoni Winschermann, Leander van der Bijl, Marco E.T. Gerards, Johann Hurink. 2024. [title omitted as review is double blind] [currently under peer review] <br>
-Leoni Winschermann, Mario Günzel, Kuan-Hsun Chen, Johann Hurink. 2024. [title omitted as review is double blind] [currently under peer review] <br>
+Leoni Winschermann, Mario Günzel, Kuan-Hsun Chen, Johann Hurink. Optimizing Electric Vehicle Scheduling with Charging Guarantees using Flow Models with Local Penalties. Accepted for ACM e-energy 2025. <br>
 Leoni Winschermann, Gerwin Hoogsteen, Johann Hurink. 2024. Making Tough Choices: Picking Robust Electric Vehicle Schedules among Optimal Solutions. [currently under peer review]
