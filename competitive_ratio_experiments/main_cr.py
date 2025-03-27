@@ -29,6 +29,7 @@ from FOCS import FOCS, FlowNet, FlowOperations, FOCSinstance
 from Bookkeeping import Bookkeeping
 from AVR import AVR
 from OA import OA
+from Price import Price
 
 bk = Bookkeeping()
 reps = 500
@@ -45,19 +46,28 @@ for timeStep in timeSteps:
     for instanceSize in instanceSizes:
         for rep in range(0,reps):
             print('rep = ', rep)
-            bk.prefix += [str(0) + '_' + str(timeStep) + '_' + str(instanceSize) + '_' + str(rep)]
+            bk.prefix += ['rev_' + str(0) + '_' + str(timeStep) + '_' + str(instanceSize) + '_' + str(rep)]
             '''--------------start instance with capacity--------------'''
             if randomSample is True:
                 sample = sorted(random.sample(range(0,len(instanceData)), instanceSize))
-                instance = FOCSinstance(instanceData.iloc[sample], timeStep)  
+                instance = FOCSinstance(instanceData.iloc[sample], timeStep)
+                instance_periodic = FOCSinstance(instanceData.iloc[sample], timeStep, periodicity=True)  
             else:
                 instance = FOCSinstance(instanceData[:instanceSize], timeStep=timeStep)      
+                instance_periodic = FOCSinstance(instanceData[:instanceSize], timeStep=timeStep, periodicity=True)      
+            '''--------------start Greedy----------'''
+            flowNet = FlowNet()
+            flowNet.focs_instance_to_network(instance_periodic)
+            flowOp = FlowOperations(flowNet.G, instance_periodic)
+
+            greedy = Price(instance_periodic, flowNet, flowOp, [i for i in range(0,instance_periodic.breakpoints[-1]-instance_periodic.breakpoints[0])])
+            greedy.solve_cost()
 
             '''--------------start OA--------------'''
             flowNet = FlowNet()
             flowNet.focs_instance_to_network(instance)
             flowOp = FlowOperations(flowNet.G, instance)
-            # flowOp.validate_global_cap()
+            
             oa = OA(instance, flowNet, flowOp)
 
             f = oa.solve_oa()
@@ -72,8 +82,10 @@ for timeStep in timeSteps:
 
             f = focs.solve_focs()
 
-            bk.write_cf(focs, avr, oa)
-            bk.write_power(focs, avr, oa)
+            '''--------------write results of rep----------'''
+            bk.write_cf(focs, avr, oa, greedy)
+            bk.write_power(focs, avr, oa, greedy)
+
         if write is True:
             bk.write_online_to_csv()
 

@@ -78,10 +78,12 @@ class Bookkeeping():
         self.ovFOCS = []
         self.ovAVR = []
         self.ovOA = []
+        self.ovGreedy = []
         self.ovFOCSmpc = []
         self.ovRatio = []
         self.ovRatioAVR = []
         self.ovRatioOA = []
+        self.ovRatioGreedy = []
 
         # power profiles
         self.power_profiles = pd.DataFrame({'i': []})
@@ -355,7 +357,7 @@ class Bookkeeping():
             self.ovFOCSmpcred +=[focsmpc.objective()]
         return
     
-    def write_cf(self, focs, avr, oa):
+    def write_cf(self, focs, avr, oa, greedy = None):
         if avr is not None:
             self.ovAVR += [avr.objective()]
 
@@ -364,6 +366,9 @@ class Bookkeeping():
 
         if focs is not None:
             self.ovFOCS += [focs.objective()]
+
+        if greedy is not None:
+            self.ovGreedy += [greedy.objective(greedy.f_cost)]
         
         if (focs is not None) and (avr is not None):
             self.ovRatioAVR += [avr.objective()/focs.objective()]
@@ -371,15 +376,24 @@ class Bookkeeping():
         if (focs is not None) and (oa is not None):
             self.ovRatioOA += [oa.objective()/focs.objective()]
 
+        if (focs is not None) and (greedy is not None):
+            self.ovRatioGreedy += [greedy.objective(greedy.f_cost)/focs.objective()]
+
         #load duration is later only a sorted list of this. Since x1 and x2 are 'independent' in the sense that we don't want them in the same plot.
         return
     
-    def write_power(self,focs,avr,oa):
+    def write_power(self,focs,avr,oa,greedy=None):
         if len(self.prefix) > 0:
-            header = ['i', 'focs_'+str(self.prefix[-1]), 'avr_'+str(self.prefix[-1]), 'oa_'+str(self.prefix[-1])]
+            if greedy is None:
+                header = ['i', 'focs_'+str(self.prefix[-1]), 'avr_'+str(self.prefix[-1]), 'oa_'+str(self.prefix[-1])]
+            else:
+                header = ['i', 'focs_'+str(self.prefix[-1]), 'avr_'+str(self.prefix[-1]), 'oa_'+str(self.prefix[-1]), 'greedy_'+str(self.prefix[-1])]
         else:
-            header = ['i', 'focs_', 'avr_', 'oa_']
-        
+            if greedy is None:
+                header = ['i', 'focs_', 'avr_', 'oa_']
+            else:
+                header = ['i', 'focs_', 'avr_', 'oa_', 'greedy_']
+
         # assuming all results are for the same instance and time horizon
         i_timeStep = [focs.instance.intervals_start[i]+freq for i in range(0, focs.instance.m) for freq in range(0,int(focs.instance.len_i[i]/focs.instance.timeStep))]
         power_profiles = [i_timeStep]
@@ -391,7 +405,15 @@ class Bookkeeping():
                 # extrapolate
                 temp += [p_i[i] for t in range(0,int(alg.instance.len_i[i]/alg.instance.timeStep))]
             power_profiles += [temp]
-        
+        if greedy is not None: # Do same for greedy
+            temp = []
+            # determine powers
+            p_i = [((greedy.f_cost["i"+str(i)]['t']/(greedy.instance.len_i[i]))*greedy.instance.timeBase) for i in range(0,greedy.instance.m)]
+            for i in range(0,greedy.instance.m):
+                # extrapolate
+                temp += [p_i[i] for t in range(0,int(greedy.instance.len_i[i]/greedy.instance.timeStep))]
+            power_profiles += [temp]
+
         # make dataframe
         df = pd.DataFrame(power_profiles).T
         df.columns = header 
@@ -412,17 +434,17 @@ class Bookkeeping():
         with open(path + 'cf_{}.csv'.format(self.prefix[-1].rsplit('_', 1)[0]), 'w', newline='' ) as f:
             writer = csv.writer(f, delimiter=';')
             #header
-            writer.writerow(['index', 'ovFOCS', 'ovAVR', 'ovOA', 'ovRatioAVR', 'ovRatioOA'])
+            writer.writerow(['index', 'ovFOCS', 'ovAVR', 'ovOA', 'ovGreedy', 'ovRatioAVR', 'ovRatioOA', 'ovRatioGreedy'])
             #content
-            writer.writerows(np.array([index, self.ovFOCS, self.ovAVR, self.ovOA, self.ovRatioAVR, self.ovRatioOA]).T.tolist())
+            writer.writerows(np.array([index, self.ovFOCS, self.ovAVR, self.ovOA, self.ovGreedy, self.ovRatioAVR, self.ovRatioOA, self.ovRatioGreedy]).T.tolist())
         
         #write competitive ratios sorted
         with open(path + 'cf_{}_sorted.csv'.format(self.prefix[-1].rsplit('_', 1)[0]), 'w', newline='' ) as f:
             writer = csv.writer(f, delimiter=';')
             #header
-            writer.writerow(['index', 'ovFOCS', 'ovAVR', 'ovOA', 'ovRatioAVR', 'ovRatioOA'])
+            writer.writerow(['index', 'ovFOCS', 'ovAVR', 'ovOA', 'ovGreedy', 'ovRatioAVR', 'ovRatioOA', 'ovRatioGreedy'])
             #content
-            writer.writerows(np.array([index, sorted(self.ovFOCS), sorted(self.ovAVR), sorted(self.ovOA), sorted(self.ovRatioAVR), sorted(self.ovRatioOA)]).T.tolist())
+            writer.writerows(np.array([index, sorted(self.ovFOCS), sorted(self.ovAVR), sorted(self.ovOA), sorted(self.ovGreedy), sorted(self.ovRatioAVR), sorted(self.ovRatioOA), sorted(self.ovRatioGreedy)]).T.tolist())
         
         return
 
