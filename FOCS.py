@@ -226,13 +226,13 @@ class FOCSinstance:
         self.jobs_demand = [self.jobs_demand[j] - supplied[j] for j in range(0,len(self.jobs))]
 
         # drop jobs that are completed.
-        jobMask = [(self.jobs_demand[j] > err) for j in range(0,len(self.jobs))]
+        # jobMask = [(self.jobs_demand[j] > err) for j in range(0,len(self.jobs))]
 
-        # update jobs
-        self.jobs_cap = [self.jobs_cap[j] for j in range(0,len(self.jobs)) if jobMask[j]]
-        self.jobs_demand = [self.jobs_demand[j] for j in range(0,len(self.jobs)) if jobMask[j]]
-        self.jobs = [self.jobs[j] for j in range(0,len(self.jobs)) if jobMask[j]]
-        self.n = len(self.jobs)
+        # # update jobs
+        # self.jobs_cap = [self.jobs_cap[j] for j in range(0,len(self.jobs)) if jobMask[j]]
+        # self.jobs_demand = [self.jobs_demand[j] for j in range(0,len(self.jobs)) if jobMask[j]]
+        # self.jobs = [self.jobs[j] for j in range(0,len(self.jobs)) if jobMask[j]]
+        # self.n = len(self.jobs)
 
         # update intervals
         self.breakpoints = [self.breakpoints[i] for i in range(0,len(self.breakpoints)) if self.breakpoints[i] >= start]
@@ -694,6 +694,7 @@ class FOCS:
         self.I_p = []
         self.I_a = instance.I_a
         self.global_cap_active = instance.global_cap_active
+        self.no_demand = False # sanity check
 
         self.I_crit = [] #end of each round, save the list of active intervals here
         self.J = instance.J #per interval, specify a list of jobs available
@@ -719,6 +720,10 @@ class FOCS:
         else:
             #print("initialize capacities of round ", self.rd)
             demand = sum([G_r["s"]["j{}".format(j)]["capacity"] for j in self.instance.jobs])
+            if demand == 0:
+                print('[WARNING]: instance has no energy demand. Return empty flow as solution.')
+                self.no_demand = True
+                return G_r
             demand_normalized = demand/self.flowOp.length_sum_intervals(self.I_a, self.instance.len_i)         
             for i in self.I_a:
                 G_r["i{}".format(i)]["t"]["capacity"] = demand_normalized * self.instance.len_i[i]
@@ -736,6 +741,8 @@ class FOCS:
             if self.it == 0:
                 G_rk = copy.deepcopy(self.G_r)
             G_rk = self.update_network_capacities_g(G_rk, self.flow_val)
+            if self.no_demand:
+                return self.f
 
             #determine max flow
             self.flow_val, flow_dict = nx.maximum_flow(G_rk, "s", "t", flow_func=self.flow_func)
