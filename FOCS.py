@@ -57,7 +57,7 @@ class FOCSinstance:
         self.jobs_arrival = [instanceData["t0_" + str(timeStep)+str(prob_t0)].iloc[j] for j in self.jobs]
 
         #initialize intervals
-        self.breakpoints = sorted(instanceData["t0_"+str(timeStep)].append(instanceData["t1_" + str(timeStep)]).drop_duplicates().tolist())
+        self.breakpoints = sorted(instanceData["t0_"+str(timeStep)]._append(instanceData["t1_" + str(timeStep)]).drop_duplicates().tolist())
         if self.periodicity:
             self.augment_breakpoints()
             if self.cumprob:
