@@ -156,6 +156,9 @@ class FOCSinstance:
 
     def augment_breakpoints(self):
         #number of units of timeStep from first to last breakpoint
+        if len(self.breakpoints) <= 0:
+            print('[WARNING]: will not augment empty breakpoints. Assumed to be empty instance.')
+            return
         nr = int(max(self.breakpoints) - min(self.breakpoints))
         if abs(nr - max(self.breakpoints) + min(self.breakpoints)) > 0.0001:
             print('[WARNING]: Breakpoints non-integer! Check augment_breakpoints() function in FOCSinstance class.')
