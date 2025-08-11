@@ -982,7 +982,6 @@ class Schedule: #class introduced to a) extract specific schedules from optimal 
         self.flowOp = focs.flowOp
         self.focs = focs
     
-    def solve_schedule(self, how = 'linear'):
     def solve_schedule(self, how = 'linear', custom = None):
         #make min cost flow network
         self.G_sched = self.flowNet.focs_solution_to_network(self.instance, self.focs.f, how=how, custom=custom)
