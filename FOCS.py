@@ -514,7 +514,7 @@ class FlowNet:
                         +  [("i"+str(i), "t") for i in instance.I_a] #D_t
                         )
         
-    def focs_solution_to_network(self, instance, f, err = 0.000001, how = 'linear', factor = 1000, structure = "focs"):
+    def focs_solution_to_network(self, instance, f, err = 0.000001, how = 'linear', factor = 1000, structure = "focs", custom = None):
         #make empty network
         if structure == "focs":
             self.focs_instance_to_network(instance)
@@ -536,6 +536,8 @@ class FlowNet:
             for j in instance.jobs:
                 n_min = int(instance.jobs_demand[j]/(instance.tau*instance.jobs_cap[j])) #rounded minimal number of intervals needed for charging
                 n_slack = len(instance.J_inverse['j'+str(j)][n_min+1:])
+                if custom is not None:
+                    how = custom[instance.jobs.index(j)]
                 for i_id, i in enumerate(instance.J_inverse['j'+str(j)][n_min+1:]):
                     if how == 'linear':
                         self.G_sched['j'+str(j)]['i'+str(i)]['weight'] = i_id + 1
