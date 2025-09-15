@@ -568,6 +568,8 @@ class FlowNet:
                             self.G_sched['j'+str(j)]['i'+str(i)]['weight'] = int(factor/(instance.jobs_cumprob[j][i]+err))
                     elif how == 'reverse':
                         self.G_sched['j'+str(j)]['i'+str(instance.J_inverse['j'+str(j)][-i_id - n_min - 1 -1])]['weight'] = i_id + 1
+                    elif how == 'None':
+                        continue
                     else:
                         print('[WARNING]: how undefined. Try \'linear\' or \'quadratic\'. No weight assigned.')
                         print('how = ', how)
