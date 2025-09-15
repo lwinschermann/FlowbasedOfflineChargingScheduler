@@ -32,7 +32,7 @@ import pandas as pd
 import csv
 import numpy as np   
 
-from FOCS import FlowNet, FlowOperations, FOCS
+from src.common.FlowbasedOfflineChargingScheduler.FOCS import FlowNet, FlowOperations, FOCS
 
 class OA:
     def __init__(self, instance, flowNet, flowOp):

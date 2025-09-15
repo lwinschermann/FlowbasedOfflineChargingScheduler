@@ -741,6 +741,7 @@ class FOCS:
         return G_r
     
     def solve_focs(self, err = 0.0000001, MPCstopper = False, MPCcondition = 0):
+        self.err = err
         while not self.terminate:
             #begin round
             #initiate capacities
@@ -753,11 +754,34 @@ class FOCS:
             #determine max flow
             self.flow_val, flow_dict = nx.maximum_flow(G_rk, "s", "t", flow_func=self.flow_func)
             self.maxDiff = sum([G_rk["s"]["j{}".format(j)]["capacity"] for j in self.instance.jobs]) - self.flow_val
-            if self.total_demand_r - self.flow_val < err:
+            # sanity check escape loop if no more active intervals
+            if (self.I_a == []):
+                logger.error('No more active intervals. Remaining demand is {}'.format(sum([G_rk["s"]["j{}".format(j)]["capacity"] for j in self.instance.jobs])))
+                
+                # sanity check escape loop after too many iterations
+                if self.it + self.rd > (self.instance.n + len(self.instance.breakpoints)):
+                    logger.error('Unreasonable number of iterations.')
+                    logger.info('Abort FOCS solver. Returning flow found so far.')
+                    self.terminate = True  
+
+                if self.err > 0.1: 
+                    if self.total_demand_r - self.flow_val < 0.1:
+                        logger.info('Tolerance increased by manipulating self.flow_val. Error is {}'.format(self.total_demand_r - self.flow_val))
+                        self.flow_val = self.total_demand_r 
+                    else:
+                        logger.info('Abort FOCS solver. Returning flow found so far.')
+                        self.terminate = True
+                else:
+                    self.err = self.err*100
+                    logger.info('Increasing tolerance by a factor 100 to err = {}'.format(self.err))
+                    # logger.info('Tolerance increased by manipulating self.flow_val. Error is {}'.format(self.total_demand_r - self.flow_val))
+                    # self.flow_val = self.total_demand_r
+
+            if self.total_demand_r - self.flow_val < self.err:
                 #end round
 
                 #Check for subcrit. For some instances, there are still active intervals that only now don't reach the max anymore #FIXME (for now)
-                subCrit_mask = [G_rk["i{}".format(i)]["t"]["capacity"]-flow_dict["i{}".format(i)]["t"] > err for i in self.I_a]
+                subCrit_mask = [G_rk["i{}".format(i)]["t"]["capacity"]-flow_dict["i{}".format(i)]["t"] > self.err for i in self.I_a]
                 subCrit = [self.I_a[i] for i in range(0,len(self.I_a)) if subCrit_mask[i]]
                 
                 #Update I_p
@@ -800,9 +824,9 @@ class FOCS:
                 #initiate next iteration
                 #Determine subcritical sets
                 if self.instance.global_cap_active:
-                    subCrit_mask = [(G_rk["i{}".format(i)]["t"]["capacity"] - flow_dict["i{}".format(i)]["t"] > err) or (self.instance.global_cap[i]*self.instance.len_i[i]*self.instance.tau/self.instance.timeStep == G_rk["i{}".format(i)]["t"]["capacity"]) for i in self.I_a]
+                    subCrit_mask = [(G_rk["i{}".format(i)]["t"]["capacity"] - flow_dict["i{}".format(i)]["t"] > self.err) or (self.instance.global_cap[i]*self.instance.len_i[i]*self.instance.tau/self.instance.timeStep == G_rk["i{}".format(i)]["t"]["capacity"]) for i in self.I_a]
                 else:
-                    subCrit_mask = [G_rk["i{}".format(i)]["t"]["capacity"] - flow_dict["i{}".format(i)]["t"] > err for i in self.I_a]
+                    subCrit_mask = [G_rk["i{}".format(i)]["t"]["capacity"] - flow_dict["i{}".format(i)]["t"] > self.err for i in self.I_a]
                 subCrit = [self.I_a[i] for i in range(0,len(self.I_a)) if subCrit_mask[i]]
 
                 #Reduce network G_rk
