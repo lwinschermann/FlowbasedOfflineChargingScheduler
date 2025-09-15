@@ -34,6 +34,17 @@ import numpy as np
 import random
 import matplotlib.pyplot as plt
 
+import os
+import logging
+logger = logging.getLogger(__name__)
+ 
+logging.basicConfig( # write logger.info for messages and warnings, if for debugging, write logger.debug. Saved to file.
+    filename= os.path.join('outputs', 'focs.log'),  
+    filemode='a',
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 class FOCSinstance:
     def __init__(self, instanceData, timeStep, timeBase = 3600, periodicity = False, cumprob=False, prob_t0='', prob_t1=''):
         self.data = instanceData
