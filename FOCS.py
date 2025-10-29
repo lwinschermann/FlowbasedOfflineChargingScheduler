@@ -67,6 +67,14 @@ class FOCSinstance:
         self.jobs_departure = [instanceData["t1_" + str(timeStep)+str(prob_t1)].iloc[j] for j in self.jobs]
         self.jobs_arrival = [instanceData["t0_" + str(timeStep)+str(prob_t0)].iloc[j] for j in self.jobs]
 
+        # logger.debug('self.n = {}'.format(self.n))
+        # logger.debug('self.jobs = {}'.format(self.jobs))
+        # logger.debug('self.jobs_cap = {}'.format(self.jobs_cap))
+        logger.debug('self.jobsdemand = {}'.format(self.jobs_demand))
+        logger.debug('self.jobsdept = {}'.format(self.jobs_departure))
+        logger.debug('self.jobsarrival = {}'.format(self.jobs_arrival))
+        logger.debug('self.timestep = {}'.format(self.timeStep))
+
         #initialize intervals
         self.breakpoints = sorted(instanceData["t0_"+str(timeStep)]._append(instanceData["t1_" + str(timeStep)]).drop_duplicates().tolist())
         if self.periodicity:
@@ -80,8 +88,12 @@ class FOCSinstance:
         self.I_a = [i for i in range(0,self.m)] 
         self.len_i = [(self.intervals_end[i] - self.intervals_start[i])*timeStep for i in self.I_a]
 
+        logger.debug('call functions')
         self.find_J_inverse()
+        logger.debug('call 2nd function')
         self.find_J()
+
+        logger.debug('finish init instance')
 
     def add_milestones(self, milestones = None, activate = True):
         self.milestones_active = activate
