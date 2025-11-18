@@ -583,8 +583,8 @@ class FlowNet:
                     elif how == 'None':
                         continue
                     else:
-                        print('[WARNING]: how undefined. Try \'linear\' or \'quadratic\'. No weight assigned.')
-                        print('how = ', how)
+                        logger.info('[WARNING]: how undefined. Try \'linear\' or \'quadratic\'. No weight assigned.')
+                        logger.debug('how = ', how)
         #add demands
         demand = max(0, sum([self.G_sched['s']['j'+str(j)]['capacity'] for j in instance.jobs]) - err)
         nx.set_node_attributes(self.G_sched, {'s': - demand, 't': demand}, name = 'demand')
